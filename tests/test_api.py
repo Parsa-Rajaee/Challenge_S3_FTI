@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
@@ -98,6 +99,61 @@ class SocrataClientTests(unittest.TestCase):
         session.get.return_value = result
         with self.assertRaises(DataValidationError):
             SocrataClient(make_settings(), session=session).fetch_page(0)
+
+    def test_schema_check_returns_matching_selected_field_types(self) -> None:
+        settings = replace(
+            make_settings(),
+            source_schema_endpoint="https://example.test/metadata.json",
+            expected_source_schema={
+                "unique_key": "text",
+                "created_date": "calendar_date",
+                "closed_date": "calendar_date",
+            },
+        )
+        session = Mock()
+        session.get.return_value = response(
+            200,
+            {
+                "columns": [
+                    {"fieldName": "unique_key", "dataTypeName": "text"},
+                    {"fieldName": "created_date", "dataTypeName": "calendar_date"},
+                    {"fieldName": "closed_date", "dataTypeName": "calendar_date"},
+                ]
+            },
+        )
+
+        client = SocrataClient(settings, session=session)
+
+        self.assertEqual(client.validate_source_schema(), settings.expected_source_schema)
+        self.assertEqual(client.request_count, 1)
+        self.assertEqual(session.get.call_args.args[0], settings.source_schema_endpoint)
+
+    def test_schema_check_rejects_missing_and_changed_fields(self) -> None:
+        settings = replace(
+            make_settings(),
+            source_schema_endpoint="https://example.test/metadata.json",
+            expected_source_schema={
+                "unique_key": "text",
+                "created_date": "calendar_date",
+                "closed_date": "calendar_date",
+            },
+        )
+        session = Mock()
+        session.get.return_value = response(
+            200,
+            {
+                "columns": [
+                    {"fieldName": "unique_key", "dataTypeName": "text"},
+                    {"fieldName": "created_date", "dataTypeName": "text"},
+                ]
+            },
+        )
+
+        with self.assertRaisesRegex(DataValidationError, "Source schema drift detected") as error:
+            SocrataClient(settings, session=session).validate_source_schema()
+
+        self.assertIn("closed_date", str(error.exception))
+        self.assertIn("created_date", str(error.exception))
 
     def test_count_endpoint_returns_integer(self) -> None:
         session = Mock()

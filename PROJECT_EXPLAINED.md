@@ -248,7 +248,7 @@ Based on `PROJECT_REQUIREMENTS_CHECKLIST.md`:
 | Population reference (`data/reference/zip_population.csv`) | 215 NYC ZCTAs with 2024 ACS estimates and documented land-overlap borough approximation |
 | Full online run from an empty folder | Not verified; current live schema request returns HTTP 403 |
 | Offline replay manifest | Produced with hashes, zero requests, and schema validation marked `skipped_offline` |
-| Rolling-window and live schema-drift checks | Not verified |
+| Rolling-window/schema-drift behavior | Offline-tested; live source verification remains blocked by HTTP 403 |
 | Notebook (`solution.ipynb`) | EDA code validated headlessly; fresh Jupyter execution and saved chart outputs remain pending |
 | Report (`report.md`) | Real analysis results documented; human review remains |
 | Git repository and history | Repository initialized but has no commits or required history |
@@ -274,7 +274,7 @@ Season_3_project/
 │   ├── analytics.py             # population join and monthly summary
 │   ├── factory.py               # full pipeline and run manifest
 │   └── exceptions.py            # error classes with exit codes
-├── tests/                       # offline unittest suite (40 tests)
+├── tests/                       # offline unittest suite (46 tests)
 ├── data/
 │   ├── raw/311/                 # downloaded pages + checkpoint (not in Git)
 │   ├── curated/                 # outputs (not in Git)

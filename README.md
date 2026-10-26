@@ -62,4 +62,5 @@ Do not commit credential files; `credential.md` is listed in `.gitignore`.
    endpoint is reachable to capture a live validation and request count.
 4. Execute `solution.ipynb` in a fresh Jupyter kernel and review its EDA charts
    and findings against the freshly generated outputs.
-5. Add tests for the CLI, factory, manifest, rolling window, and schema drift.
+5. Review live schema validation when API access is available; rolling-window
+   state and schema-drift responses already have offline tests.

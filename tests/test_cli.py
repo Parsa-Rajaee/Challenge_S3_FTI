@@ -5,9 +5,12 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from datetime import date, timedelta
 from pathlib import Path
 
-from nyc311_factory.cli import main
+from nyc311_factory.cli import _rolling_settings, _write_rolling_state, main
+from nyc311_factory.config import load_settings
+from nyc311_factory.exceptions import DataValidationError
 
 
 class CliTests(unittest.TestCase):
@@ -35,6 +38,56 @@ class CliTests(unittest.TestCase):
             encoding="utf-8",
         )
         return config_path
+
+    def test_first_rolling_window_uses_requested_lookback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = load_settings(self.write_config(Path(directory)))
+
+            rolling_settings, (state_path, end_date) = _rolling_settings(settings, 7)
+
+            self.assertEqual(rolling_settings.end_date, end_date)
+            self.assertEqual((end_date - rolling_settings.start_date).days, 7)
+            self.assertEqual(rolling_settings.target_min_records, 0)
+            self.assertFalse(state_path.exists())
+
+    def test_rolling_window_resumes_from_previous_end_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = load_settings(self.write_config(Path(directory)))
+            previous_end = date.today() - timedelta(days=10)
+            state_path = settings.raw_dir.parent / "rolling_state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(
+                json.dumps({"last_end_date": previous_end.isoformat()}),
+                encoding="utf-8",
+            )
+
+            rolling_settings, _ = _rolling_settings(settings, 7)
+
+            self.assertEqual(rolling_settings.start_date, previous_end)
+            self.assertGreater(rolling_settings.end_date, previous_end)
+
+    def test_corrupt_rolling_state_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = load_settings(self.write_config(Path(directory)))
+            state_path = settings.raw_dir.parent / "rolling_state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(DataValidationError, "Cannot use rolling-window state"):
+                _rolling_settings(settings, 7)
+
+    def test_rolling_state_writes_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rolling_state.json"
+            last_end_date = date(2025, 1, 1)
+
+            _write_rolling_state(path, last_end_date)
+
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                {"last_end_date": "2025-01-01"},
+            )
+            self.assertFalse(path.with_suffix(".json.tmp").exists())
 
     def test_offline_mode_rejects_individual_pipeline_steps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
