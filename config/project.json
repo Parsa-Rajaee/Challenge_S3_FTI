@@ -1,0 +1,38 @@
+{
+  "api_endpoint": "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+  "source_schema_endpoint": "https://data.cityofnewyork.us/api/views/erm2-nwe9.json",
+  "start_date": "2024-01-01",
+  "end_date": "2025-07-01",
+  "complaint_type": "HEAT/HOT WATER",
+  "page_size": 50000,
+  "retry_attempts": 4,
+  "retry_backoff_seconds": 1.0,
+  "request_timeout_seconds": 60,
+  "request_method": "GET",
+  "target_min_records": 300000,
+  "max_quarantine_ratio": 0.05,
+  "rolling_window_days": 30,
+  "raw_dir": "data/raw/311",
+  "checkpoint_path": "data/raw/311/checkpoint.json",
+  "population_path": "data/reference/zip_population.csv",
+  "selected_fields": [
+    "unique_key",
+    "created_date",
+    "closed_date",
+    "agency",
+    "complaint_type",
+    "descriptor",
+    "incident_zip",
+    "borough"
+  ],
+  "expected_source_schema": {
+    "unique_key": "text",
+    "created_date": "calendar_date",
+    "closed_date": "calendar_date",
+    "agency": "text",
+    "complaint_type": "text",
+    "descriptor": "text",
+    "incident_zip": "text",
+    "borough": "text"
+  }
+}

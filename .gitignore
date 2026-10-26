@@ -1,0 +1,27 @@
+# Python environments and build artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Downloaded source records and generated results
+/data/raw/*
+!/data/raw/.gitkeep
+/data/curated/*
+!/data/curated/.gitkeep
+
+# Supplied raw Census extracts (not required by the pipeline)
+/DECENNIALDHC2020.P1-Column-Metadata.csv
+/DECENNIALDHC2020.P1-Data.csv
+/DECENNIALDHC2020.P1-Table-Notes.txt
+/data/ACSDT5Y2024.B01003-2026-10-24T204530.csv
+
+# Local credentials
+.env
+credential.md
