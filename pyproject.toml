@@ -13,6 +13,12 @@ dependencies = [
     "matplotlib==3.10.8",
 ]
 
+[project.optional-dependencies]
+database = ["SQLAlchemy==2.0.36", "psycopg2-binary==2.9.9"]
+
+[tool.setuptools.package-data]
+nyc311_factory = ["sql/*.sql"]
+
 [project.scripts]
 nyc311-factory = "nyc311_factory.cli:main"
 

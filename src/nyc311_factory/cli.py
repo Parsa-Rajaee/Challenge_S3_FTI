@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Join existing curated records to the population reference",
     )
+    modes.add_argument(
+        "--load-curated-to-database",
+        action="store_true",
+        help="Upsert existing curated records into PostgreSQL using DATABASE_URL",
+    )
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -75,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = load_settings(args.config)
         if args.offline and any(
-            (args.count_only, args.download_only, args.curate_only, args.analyze_only)
+            (args.count_only, args.download_only, args.curate_only, args.analyze_only,
+             args.load_curated_to_database)
         ):
             raise DataValidationError("--offline can only be used with the full factory")
         if args.offline and args.rolling_window_days is not None:
@@ -110,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
                 population,
                 output_dir,
             )
+        elif args.load_curated_to_database:
+            from .database import load_curated_to_database
+
+            result = load_curated_to_database(output_dir / "curated_records.csv")
         else:
             # Full pipeline. The rolling state is saved only after the whole run succeeds.
             result = run_factory(settings, offline=args.offline)
