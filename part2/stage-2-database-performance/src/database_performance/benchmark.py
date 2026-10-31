@@ -9,8 +9,44 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, text
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.expression import ClauseElement, Executable
 
 QUERY_DIR = Path(__file__).resolve().parents[2] / "sql" / "queries"
+
+
+class Explain(Executable, ClauseElement):
+    """Compile EXPLAIN around a bound statement instead of concatenating SQL text."""
+
+    inherit_cache = False
+
+    def __init__(
+        self,
+        statement: Any,
+        *,
+        analyze: bool = False,
+        buffers: bool = False,
+        format: str | None = None,
+    ) -> None:
+        self.statement = statement
+        self.analyze = analyze
+        self.buffers = buffers
+        self.format = format
+
+
+@compiles(Explain)
+def _compile_explain(element: Explain, compiler: Any, **kwargs: Any) -> str:
+    options: list[str] = []
+    if element.analyze:
+        options.append("ANALYZE")
+    if element.buffers:
+        options.append("BUFFERS")
+    if element.format:
+        options.append(f"FORMAT {element.format}")
+    prefix = "EXPLAIN"
+    if options:
+        prefix += " (" + ", ".join(options) + ")"
+    return f"{prefix} {compiler.process(element.statement, **kwargs)}"
 
 
 def benchmark_queries(
@@ -29,7 +65,8 @@ def benchmark_queries(
         statement = text(path.read_text(encoding="utf-8"))
         with engine.connect() as connection:
             plan = connection.execute(
-                text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement.text), parameters
+                Explain(statement, analyze=True, buffers=True, format="JSON"),
+                parameters,
             ).scalar_one()
             connection.execute(statement, parameters).all()  # warm cache and consume results
             samples_ms: list[float] = []

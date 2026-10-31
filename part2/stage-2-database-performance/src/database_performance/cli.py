@@ -21,6 +21,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="Stage 1 output to load into the separate nyc311 schema")
     load.add_argument("--skip-stage1", action="store_true",
                       help="load Olist only, even if the Stage 1 curated CSV exists")
+    build = subparsers.add_parser(
+        "build",
+        help="apply migrations and indexes, load Olist and Stage 1, rebuild snapshots",
+    )
+    build.add_argument("--raw-dir", default="data/raw")
+    build.add_argument("--batch-size", type=int, default=2000)
+    build.add_argument("--stage1-csv", default="data/curated/curated_records.csv",
+                       help="Stage 1 output to load into the separate nyc311 schema")
+    build.add_argument("--skip-stage1", action="store_true",
+                       help="load Olist only, even if the Stage 1 curated CSV exists")
     indexes = subparsers.add_parser("add-indexes", help="apply candidate dashboard indexes")
     indexes.add_argument("--include-candidates", action="store_true", required=True,
                          help="acknowledge indexes have write/storage costs")
@@ -37,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         from sqlalchemy import create_engine, text
 
         from .benchmark import benchmark_queries, database_sizes
-        from .loader import apply_migrations, load_olist
+        from .loader import apply_migrations, load_olist, rebuild_monthly_snapshots
 
         engine = create_engine(url, pool_pre_ping=True)
         try:
@@ -48,9 +58,11 @@ def main(argv: list[str] | None = None) -> int:
                         connection.execute(text("DROP SCHEMA IF EXISTS olist CASCADE"))
                         connection.execute(text("DROP TABLE IF EXISTS public.schema_migrations"))
                 print(json.dumps({"applied_migrations": apply_migrations(engine)}, indent=2))
-            elif args.command == "load":
-                apply_migrations(engine)
+            elif args.command in {"load", "build"}:
+                include_indexes = args.command == "build"
+                apply_migrations(engine, include_indexes=include_indexes)
                 result = load_olist(engine, args.raw_dir, batch_size=args.batch_size)
+                result["applied_indexes"] = include_indexes
                 stage1_path = os.path.abspath(args.stage1_csv)
                 if args.skip_stage1:
                     result["stage1_destination"] = {"status": "skipped by request"}
@@ -63,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
                         "status": "not loaded; Stage 1 curated CSV is missing",
                         "expected_path": stage1_path,
                     }
+                if args.command == "build":
+                    rebuild_monthly_snapshots(engine)
+                    result["monthly_snapshot"] = "rebuilt"
                 print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
             elif args.command == "add-indexes":
                 print(json.dumps({"applied_migrations": apply_migrations(engine, include_indexes=True)}, indent=2))

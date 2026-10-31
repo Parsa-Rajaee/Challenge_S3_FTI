@@ -97,6 +97,7 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
         }).mappings().all()
 
     def test_monthly_revenue_counts_distinct_orders_and_uses_item_price(self):
+        self._execute("CALL analytics.rebuild_monthly_snapshot(:month)", {"month": date(2017, 4, 1)})
         rows = self._query("01_monthly_revenue.sql")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["revenue"], 150)

@@ -14,7 +14,11 @@ from sqlalchemy import Engine, insert, text
 
 from .schema import DATASETS, Dataset
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "sql" / "migrations"
+SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
+MIGRATIONS_DIR = SQL_DIR / "migrations"
+TRUNCATE_OLIST_SQL = (SQL_DIR / "load" / "truncate_olist.sql").read_text(encoding="utf-8")
+ANALYZE_OLIST_SQL = (SQL_DIR / "load" / "analyze_olist.sql").read_text(encoding="utf-8")
+REBUILD_SNAPSHOTS_SQL = (SQL_DIR / "load" / "rebuild_snapshots.sql").read_text(encoding="utf-8")
 
 
 class DatasetError(ValueError):
@@ -93,17 +97,13 @@ def load_olist(engine: Engine, raw_dir: str | Path, *, batch_size: int = 2000) -
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as rejected:
             with engine.begin() as connection:
-                connection.execute(text(
-                    "TRUNCATE TABLE " + ", ".join(f'olist."{dataset.name}"' for dataset in reversed(DATASETS))
-                    + " RESTART IDENTITY CASCADE"
-                ))
+                connection.exec_driver_sql(TRUNCATE_OLIST_SQL)
                 for dataset in DATASETS:
                     counts[dataset.name] = _load_dataset(
                         connection, root / dataset.filename, dataset, indexes,
                         rejected, quarantine, batch_size,
                     )
-                for dataset in DATASETS:
-                    connection.exec_driver_sql(f'ANALYZE olist."{dataset.name}"')
+                connection.exec_driver_sql(ANALYZE_OLIST_SQL)
             committed = True
         try:
             os.replace(temporary, quarantine_path)
@@ -122,6 +122,12 @@ def load_olist(engine: Engine, raw_dir: str | Path, *, batch_size: int = 2000) -
         "loaded_rows": sum(item["loaded"] for item in counts.values()),
         "source_rows": sum(item["source"] for item in counts.values()),
     }
+
+
+def rebuild_monthly_snapshots(engine: Engine) -> None:
+    """Rebuild every delivered-order month in analytics.monthly_category_snapshot."""
+    with engine.begin() as connection:
+        connection.exec_driver_sql(REBUILD_SNAPSHOTS_SQL)
 
 
 def _load_dataset(

@@ -9,7 +9,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from database_performance.loader import load_olist
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import text
+
+from database_performance.benchmark import Explain
+from database_performance.loader import (
+    ANALYZE_OLIST_SQL,
+    REBUILD_SNAPSHOTS_SQL,
+    TRUNCATE_OLIST_SQL,
+    load_olist,
+)
 from database_performance.schema import DATASETS
 
 
@@ -51,6 +60,23 @@ class LoaderGuardTests(unittest.TestCase):
             self.assertTrue(quarantine.is_file())
             self.assertEqual(quarantine.read_text(encoding="utf-8"), "")
             self.assertEqual(list(quarantine.parent.glob(".olist-quarantine-*.tmp")), [])
+
+    def test_load_sql_is_static_and_covers_every_olist_table(self):
+        names = [dataset.name for dataset in DATASETS]
+        for name in names:
+            self.assertIn(f"olist.{name}", TRUNCATE_OLIST_SQL)
+            self.assertIn(f"ANALYZE olist.{name};", ANALYZE_OLIST_SQL)
+        self.assertIn("RESTART IDENTITY CASCADE", TRUNCATE_OLIST_SQL)
+        self.assertIn("CALL analytics.rebuild_monthly_snapshot", REBUILD_SNAPSHOTS_SQL)
+
+    def test_explain_compiles_options_without_python_string_concatenation_of_user_sql(self):
+        compiled = str(
+            Explain(text("SELECT 1"), analyze=True, buffers=True, format="JSON").compile(
+                dialect=postgresql.dialect()
+            )
+        )
+        self.assertTrue(compiled.startswith("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)"))
+        self.assertIn("SELECT 1", compiled)
 
 
 if __name__ == "__main__":

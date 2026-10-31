@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, select, table, text
 
 engine = create_engine(os.environ["DATABASE_URL"])
 with engine.connect() as connection:
@@ -20,10 +20,7 @@ with engine.connect() as connection:
     for schema_name, name, kind in relations:
         count = ""
         if kind == "r":
-            # Identifiers come from the catalog; quote them rather than interpolate raw text.
-            quoted = connection.dialect.identifier_preparer.quote
-            count = connection.exec_driver_sql(
-                f"SELECT count(*) FROM {quoted(schema_name)}.{quoted(name)}"
-            ).scalar_one()
+            relation = table(name, schema=schema_name)
+            count = connection.execute(select(func.count()).select_from(relation)).scalar_one()
         print(f"  {schema_name}.{name} ({kind}) {count}")
 engine.dispose()
