@@ -44,7 +44,7 @@ python -m pip install -e .\part2\stage-2-database-performance
 Install and start Docker Desktop if you do not already have PostgreSQL. In PowerShell, create a local PostgreSQL container:
 
 ```powershell
-$env:POSTGRES_PASSWORD = Read-Host "1234"
+$env:POSTGRES_PASSWORD = "1234"
 docker run --name season3-postgres -e POSTGRES_USER=season3 -e POSTGRES_PASSWORD -e POSTGRES_DB=olist -p 127.0.0.1:5432:5432 -d postgres:16
 ```
 
@@ -114,7 +114,16 @@ From the Stage 2 folder, with the same environment activated:
 python -m unittest discover -s tests -v
 ```
 
-The schema tests run offline. PostgreSQL integration tests are skipped until `DATABASE_URL` is set. To run those tests, complete Steps 2–4 first. The integration tests create sample rows inside a transaction and roll them back when each test finishes.
+The schema tests run offline. PostgreSQL integration tests are skipped until `DATABASE_URL` is set. To run them against a dedicated clean test database without interference from loaded Olist data:
+
+```powershell
+docker exec season3-postgres createdb -U season3 olist_test
+$env:DATABASE_URL = "postgresql+psycopg2://season3:1234@localhost:5432/olist_test"
+nyc311-db init-db
+python -m unittest discover -s tests -v
+```
+
+The integration tests create sample rows inside a transaction and roll them back when each test finishes.
 
 The Stage 1 test suite still runs from the project root:
 
@@ -138,28 +147,10 @@ Use the actual numbers written by the notebook to finish `report.md`. In particu
 
 **Never invent timings or say a query meets the 200 ms budget until PostgreSQL actually ran it and the saved notebook output shows the result.** The database is not currently available in this workspace, so those performance results are not filled in for you.
 
-## Tiny SQL glossary
-
-| Word | Plain-English meaning |
-| --- | --- |
-| Database | A program that stores data in tables and answers questions about it. |
-| Table | A collection of rows and columns, like a carefully typed spreadsheet. |
-| Row | One record, such as one order. |
-| Primary key | The column(s) that uniquely identify a row. |
-| Foreign key | A rule requiring a referenced row to exist, such as an order's customer. |
-| `NULL` | An unknown or missing value; it is not the same as zero or an empty string. |
-| `JOIN` | Combines related rows from two tables using matching keys. |
-| `GROUP BY` | Collects rows into groups so `SUM`, `COUNT`, or `AVG` can summarize them. |
-| Index | An extra lookup structure that can speed up reads but uses storage and slows writes. |
-| Query plan | PostgreSQL's explanation of how it intends to answer a SQL question. |
-| View | A named SQL query that reads the current underlying rows. |
-| Snapshot | A stored copy of a calculation that must be refreshed when source data changes. |
-| Transaction | A group of database changes that either all succeed or all roll back together. |
-
 ## If something goes wrong
 
 - **`DATABASE_URL` missing:** set it in the same PowerShell window used to launch Jupyter.
-- **Docker pipe/engine error:** open Docker Desktop and wait for it to finish starting.
+- **Docker pipe/engine error:** open Docker Desktop and wait for it to finish starting. 
 - **CSV missing:** extract all nine files directly into `data/raw/`; do not put them in an extra nested folder.
 - **Missing table/schema:** run `nyc311-db init-db --reset`, then restart the notebook.
 - **SQLAlchemy or `nyc311-db` not found:** activate `.venv` and repeat Step 1.

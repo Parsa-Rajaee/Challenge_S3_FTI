@@ -1,3 +1,11 @@
+-- ============================================================================
+-- Rebuild All Monthly Category Snapshots
+-- ============================================================================
+-- Iterates over every distinct purchase month with delivered orders and calls
+-- the stored procedure `analytics.rebuild_monthly_snapshot(month)` to
+-- populate the pre-aggregated table `analytics.monthly_category_snapshot`.
+-- ============================================================================
+
 DO $body$
 DECLARE
     snapshot_month date;

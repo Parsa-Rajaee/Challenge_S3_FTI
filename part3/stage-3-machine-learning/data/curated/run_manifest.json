@@ -1,0 +1,24 @@
+{
+  "run_started_at_utc": "2026-11-04T14:24:57.909077+00:00",
+  "run_finished_at_utc": "2026-11-04T14:26:45.742514+00:00",
+  "duration_seconds": 107.833,
+  "code_version": "0.1.0",
+  "code_revision": "53979ebb6a51facc9d8cb32456ff50acc6b20640",
+  "source_file": "E:\\Parsa\\Season_3_project\\part3\\stage-3-machine-learning\\data\\raw\\cs-training.csv",
+  "source_file_sha256": "1bd46da486a5708c58c7b01a034fae2a13b327f6f7b62ea7ba4fe3b5824b24ac",
+  "raw_records": 150000,
+  "accepted_records": 150000,
+  "quarantined_records": 0,
+  "quarantine_by_reason": {},
+  "database_destination": {
+    "destination_table": "credit.borrowers",
+    "destination_view": "credit.vw_borrowers_clean",
+    "rows_upserted": 150000,
+    "mode": "idempotent_upsert"
+  },
+  "outputs_sha256": {
+    "curated_records.csv": "a84ee72c995056e0f0a6183cce979d6e4901b27b54b0aff36d8a5063f9fb0637",
+    "quarantine.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "quality_report.json": "266901470e873567ba1bc62dfe91420c1232c0e2efb234f3d5de2e7e272f3e00"
+  }
+}

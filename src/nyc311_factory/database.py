@@ -64,7 +64,7 @@ def load_curated_to_database(
                         "agency": row["agency"], "complaint_type": row["complaint_type"],
                         "descriptor": row["descriptor"] or None,
                         "incident_zip": row["incident_zip"] or None,
-                        "borough": row["borough"],
+                        "borough": row["borough"] or None,
                         "closure_days": float(row["closure_days"]) if row["closure_days"] else None,
                     })
                     if len(pending) == batch_size:

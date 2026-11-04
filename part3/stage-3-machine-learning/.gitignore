@@ -1,0 +1,10 @@
+# Environment and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp

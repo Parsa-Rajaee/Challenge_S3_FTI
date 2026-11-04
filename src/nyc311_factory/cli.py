@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upsert existing curated records into PostgreSQL using DATABASE_URL",
     )
+    modes.add_argument(
+        "--load-credit-csv",
+        type=Path,
+        help="Ingest, validate, quarantine and load credit CSV into PostgreSQL",
+    )
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -120,6 +125,14 @@ def main(argv: list[str] | None = None) -> int:
             from .database import load_curated_to_database
 
             result = load_curated_to_database(output_dir / "curated_records.csv")
+        elif args.load_credit_csv:
+            from .credit_factory import run_credit_factory
+
+            result = run_credit_factory(
+                csv_path=args.load_credit_csv,
+                output_dir=Path("part3/stage-3-machine-learning/data/curated"),
+                load_to_db=True,
+            )
         else:
             # Full pipeline. The rolling state is saved only after the whole run succeeds.
             result = run_factory(settings, offline=args.offline)

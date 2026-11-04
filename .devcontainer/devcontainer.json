@@ -1,0 +1,35 @@
+{
+  "name": "Season 3 Data Science & Machine Learning",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "containerEnv": {
+    "DATABASE_URL": "postgresql+psycopg2://season3:1234@localhost:5432/olist",
+    "POSTGRES_PASSWORD": "1234",
+    "PGPASSWORD": "1234"
+  },
+  "forwardPorts": [5432],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-toolsai.vscode-jupyter-cell-tags",
+        "ms-toolsai.jupyter-renderers",
+        "cweijan.vscode-database-client2"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.testing.pytestArgs": [
+          "part3/stage-3-machine-learning/tests",
+          "part2/stage-2-database-performance/tests",
+          "tests"
+        ]
+      }
+    }
+  },
+  "postCreateCommand": "bash scripts/setup_codespaces.sh",
+  "postStartCommand": "sudo service postgresql start",
+  "remoteUser": "vscode"
+}

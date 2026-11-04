@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "credit-risk-ml"
+version = "0.1.0"
+description = "Stage 3 Machine Learning - Cost-Sensitive Credit Risk Default Prediction"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas==2.3.3",
+    "scikit-learn==1.9.1",
+    "SQLAlchemy==2.0.36",
+    "psycopg2-binary==2.9.9",
+    "matplotlib==3.10.8",
+    "seaborn==0.13.2",
+    "joblib==1.6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
