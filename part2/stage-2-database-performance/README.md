@@ -1,7 +1,6 @@
 # Stage 2 — Database Performance
 
-See [`GETTING_STARTED.md`](GETTING_STARTED.md) for PostgreSQL and dataset setup.
-Run these commands from the **repository root**, using Python 3.11+:
+Run these setup and build commands from the **repository root**, using Python 3.11+:
 
 ```powershell
 python -m pip install -r requirements.txt
