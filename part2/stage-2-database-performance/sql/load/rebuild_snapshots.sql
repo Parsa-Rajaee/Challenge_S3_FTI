@@ -6,6 +6,9 @@
 -- populate the pre-aggregated table `analytics.monthly_category_snapshot`.
 -- ============================================================================
 
+-- A full rebuild also removes months that disappeared from the source.
+DELETE FROM analytics.monthly_category_snapshot;
+
 DO $body$
 DECLARE
     snapshot_month date;

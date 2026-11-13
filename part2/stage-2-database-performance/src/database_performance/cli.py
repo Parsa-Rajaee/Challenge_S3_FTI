@@ -116,13 +116,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"applied_migrations": apply_migrations(engine)}, indent=2))
 
             elif args.command in {"load", "build"}:
+                stage1_path = os.path.abspath(args.stage1_csv)
+                if not args.skip_stage1 and not os.path.isfile(stage1_path):
+                    raise FileNotFoundError(
+                        "Stage 1 curated CSV is required; supply --stage1-csv, "
+                        "run Stage 1 first, or explicitly use --skip-stage1"
+                    )
                 include_indexes = args.command == "build"
-                apply_migrations(engine, include_indexes=include_indexes)
+                apply_migrations(
+                    engine, include_indexes=include_indexes,
+                    include_retirements=include_indexes,
+                )
                 result = load_olist(engine, args.raw_dir, batch_size=args.batch_size)
                 result["applied_indexes"] = include_indexes
 
                 # Load Stage 1 destination if available and not explicitly skipped
-                stage1_path = os.path.abspath(args.stage1_csv)
                 if args.skip_stage1:
                     result["stage1_destination"] = {"status": "skipped by request"}
                 elif os.path.isfile(stage1_path):
@@ -130,14 +138,22 @@ def main(argv: list[str] | None = None) -> int:
 
                     result["stage1_destination"] = load_curated_to_database(stage1_path, database_url=url)
                 else:
-                    result["stage1_destination"] = {
-                        "status": "not loaded; Stage 1 curated CSV is missing",
-                        "expected_path": stage1_path,
-                    }
+                    raise FileNotFoundError(
+                        "Stage 1 curated CSV is required; supply --stage1-csv, "
+                        "run Stage 1 first, or explicitly use --skip-stage1"
+                    )
 
                 # Rebuild snapshot table when building fully
                 if args.command == "build":
                     rebuild_monthly_snapshots(engine)
+                    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                        for statement in (
+                            "VACUUM (ANALYZE) olist.orders",
+                            "VACUUM (ANALYZE) olist.order_items",
+                            "VACUUM (ANALYZE) olist.order_payments",
+                            "VACUUM (ANALYZE) olist.order_reviews",
+                        ):
+                            connection.exec_driver_sql(statement)
                     result["monthly_snapshot"] = "rebuilt"
 
                 print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

@@ -37,18 +37,22 @@ class DatasetError(ValueError):
     """Raised when an Olist CSV file does not match its declared schema or headers."""
 
 
-def apply_migrations(engine: Engine, *, include_indexes: bool = False) -> list[str]:
+def apply_migrations(
+    engine: Engine, *, include_indexes: bool = False, include_retirements: bool = False,
+) -> list[str]:
     """Apply pending SQL schema migrations tracked in public.schema_migrations.
 
     Args:
         engine: SQLAlchemy database engine.
-        include_indexes: If True, candidate index migration `003_candidate_indexes.sql`
-                         is executed. By default (False), candidate indexes are omitted
-                         to measure baseline performance without indexes.
+        include_indexes: Apply candidate and covering-index migrations when True.
+                         Otherwise omit them for a primary-key-only baseline.
+        include_retirements: Apply the plan-justified final index retirements.
 
     Returns:
         List of newly applied migration file names.
     """
+    if include_retirements and not include_indexes:
+        raise ValueError("Retirements require the complete index migration sequence")
     applied: list[str] = []
     with engine.begin() as connection:
         # Create migration tracking table if it does not yet exist
@@ -59,17 +63,19 @@ def apply_migrations(engine: Engine, *, include_indexes: bool = False) -> list[s
         known = set(connection.execute(text("SELECT version FROM public.schema_migrations")).scalars())
 
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            # 004 is an optional post-benchmark retirement migration; do not apply in standard runs
-            if path.name.startswith("004_"):
+            # Retire candidates only after plan evidence, or for the final build.
+            if path.name[:3] in {"004", "006"} and not include_retirements:
                 continue
-            # 003 contains candidate indexes; apply only when explicitly requested
-            if path.name.startswith("003_") and not include_indexes:
+            # Performance indexes are deliberately omitted from baseline builds.
+            if path.name[:3] in {"003", "005"} and not include_indexes:
                 continue
             if path.name in known:
                 continue
 
-            # Execute migration SQL script and log completion
-            connection.exec_driver_sql(path.read_text(encoding="utf-8"))
+            # Literal migration comments may contain percent signs (psycopg2).
+            connection.exec_driver_sql(
+                path.read_text(encoding="utf-8"), execution_options={"no_parameters": True}
+            )
             connection.execute(
                 text("INSERT INTO public.schema_migrations (version) VALUES (:version)"),
                 {"version": path.name},
@@ -81,8 +87,8 @@ def apply_migrations(engine: Engine, *, include_indexes: bool = False) -> list[s
 def retire_unused_geolocation_index(engine: Engine) -> list[str]:
     """Execute migration 004 to drop the unused geolocation index.
 
-    Invoked after query plans prove that none of the 5 analytical questions
-    access `olist.geolocation`, saving ~9.2 MB of storage.
+    Invoked after query plans prove that none of the five analytical questions
+    access `olist.geolocation`. The notebook measures the space reclaimed.
     """
     migration = "004_drop_unused_geolocation_index.sql"
     path = MIGRATIONS_DIR / migration
@@ -98,7 +104,9 @@ def retire_unused_geolocation_index(engine: Engine) -> list[str]:
         ).first():
             return []
 
-        connection.exec_driver_sql(path.read_text(encoding="utf-8"))
+        connection.exec_driver_sql(
+            path.read_text(encoding="utf-8"), execution_options={"no_parameters": True}
+        )
         connection.execute(
             text("INSERT INTO public.schema_migrations (version) VALUES (:version)"),
             {"version": migration},

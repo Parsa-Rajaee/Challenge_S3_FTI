@@ -7,6 +7,7 @@
 -- ============================================================================
 
 TRUNCATE TABLE
+    analytics.monthly_category_snapshot,
     olist.geolocation,
     olist.order_reviews,
     olist.order_payments,
