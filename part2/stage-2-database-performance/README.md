@@ -1,36 +1,65 @@
 # Stage 2 — Database Performance
 
-New to SQL? Start with [`GETTING_STARTED.md`](GETTING_STARTED.md), which explains every setup step and database term.
-
-## Quick setup (PowerShell, from the project root)
+See [`GETTING_STARTED.md`](GETTING_STARTED.md) for PostgreSQL and dataset setup.
+Run these commands from the **repository root**, using Python 3.11+:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m pip install -e ".[database]"
+python -m pip install -r part2\stage-2-database-performance\requirements.txt
 python -m pip install -e .\part2\stage-2-database-performance
 ```
 
-Start Docker Desktop, download the nine Olist CSV files into `part2/stage-2-database-performance/data/raw/`, and set `DATABASE_URL` in the same shell; the detailed instructions and PowerShell commands are in `GETTING_STARTED.md`.
+Provide the nine Olist CSVs in `part2/stage-2-database-performance/data/raw/`
+and Stage 1's `data/curated/curated_records.csv`. Raw inputs are not committed.
+Set `DATABASE_URL` to a PostgreSQL SQLAlchemy URL in the launching shell; no
+credentials are embedded in the notebook.
 
-## Database commands (from the project root)
-
-```powershell
-# From an empty PostgreSQL database, one command creates the tables and loads Olist.
-nyc311-db load --raw-dir part2\stage-2-database-performance\data\raw
-
-# For a clean, repeatable Notebook baseline, reset the Stage 2 schemas first.
-nyc311-db init-db --reset
-```
-
-The load command also upserts Stage 1's `data/curated/curated_records.csv` into `nyc311.service_requests` when that file exists; pass `--skip-stage1` to omit it. `--reset` drops only the Stage 2 `olist` and `analytics` schemas. It is destructive to those schemas; do not use it where their data must be kept. The loader replaces Olist rows in one transaction and writes rejected rows to `part2/stage-2-database-performance/data/curated/integrity_quarantine.jsonl`.
-
-Open `solution.ipynb` and run **Restart Kernel & Run All** to collect query plans, repeatable timings, write-cost comparisons, per-index sizes, and the view/snapshot comparison. The notebook expects a fresh baseline (no candidate indexes); reset the local schemas before each full experiment. It checks plan evidence before applying the versioned migration that drops the unused geolocation index. The 200 ms target is not claimed until a real PostgreSQL run confirms it.
-
-Run the Stage 2 tests from this directory:
+## Build from an empty database
 
 ```powershell
-python -m unittest discover -s tests -v
+nyc311-db build --raw-dir part2\stage-2-database-performance\data\raw --stage1-csv data\curated\curated_records.csv
 ```
 
-Offline schema tests always run. PostgreSQL integration tests need `DATABASE_URL` and initialized migrations. The original Stage 1 package remains at the project root; install it with the database extra and use `nyc311-factory --load-curated-to-database` to send its curated CSV to PostgreSQL.
+This applies versioned migrations and final indexes, transactionally loads Olist,
+loads Stage 1 through its original package, rebuilds all monthly snapshots, and
+runs `VACUUM (ANALYZE)` for the static imported tables. Missing Stage 1 input is
+an error unless you explicitly request `--skip-stage1` (not a complete submission).
+`load` alone does **not** populate the dashboard snapshot; use `build`.
+
+## Reproduce the notebook
+
+**Use a separate disposable database.** The notebook intentionally replaces its
+`olist` and `analytics` schemas and `public.schema_migrations`, then builds a
+primary-key-only baseline. It does not reset `nyc311` or Stage 3's `credit` schema,
+but sharing the experiment database with other stages is not recommended.
+
+Open `solution.ipynb` with the pinned environment and **Restart Kernel & Run All**, or:
+
+```powershell
+python part2\stage-2-database-performance\scripts\run_notebook.py
+```
+
+The runner starts a fresh kernel and saves outputs only after success. Use
+`--kernel <installed-kernel-name>` if `python3` is not your pinned environment.
+The notebook saves SQL, repeated timings, complete before/after plans, index
+sizes, insert costs, result-equivalence checks, and runtime in its outputs and
+`data/curated/performance_results.json`. The JSON is generated/ignored; the
+executed notebook is the committed evidence.
+
+Q1 uses the monthly snapshot and must be refreshed after source changes. Q2–Q5
+remain live. Q5's index-only scans assume visibility-map maintenance; benchmark
+again after substantial writes. The report distinguishes median and worst
+observed sample rather than promising a production latency SLA.
+
+## Tests
+
+Point `DATABASE_URL` at a **different empty test database**, initialize it, then:
+
+```powershell
+nyc311-db init-db
+python -m unittest discover -s part2\stage-2-database-performance\tests -v
+```
+
+Tests roll back fixtures and refuse to touch an Olist database containing rows.
+Without `DATABASE_URL`, database integration tests are explicitly skipped.
