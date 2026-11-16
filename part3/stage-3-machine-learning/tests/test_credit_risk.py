@@ -13,6 +13,8 @@ Covers all 8 required test areas:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -163,3 +165,141 @@ def test_8_database_view_loading():
     assert "applicant_id" in df.columns
     assert "serious_dlqin_2yrs" in df.columns
     assert "has_sentinel_late_code" in df.columns
+
+
+def test_9_model_serialization_and_deserialization():
+    """Verify CreditRiskPipeline can be serialized to disk and loaded back with identical weights."""
+    import tempfile
+    from credit_risk.pipeline import CreditRiskPipeline
+
+    pipeline = CreditRiskPipeline()
+    # Dummy training data
+    df_train = pd.DataFrame({
+        "applicant_id": [1, 2, 3, 4],
+        "serious_dlqin_2yrs": [0, 1, 0, 1],
+        "revolving_utilization_of_unsecured_lines": [0.1, 0.9, 0.2, 0.8],
+        "age": [30, 25, 60, 45],
+        "number_of_time30_59_days_past_due_not_worse": [0, 2, 0, 1],
+        "debt_ratio": [0.2, 0.7, 0.1, 0.5],
+        "monthly_income": [4000.0, 2000.0, 7000.0, 3500.0],
+        "number_of_open_credit_lines_and_loans": [5, 2, 8, 4],
+        "number_of_times90_days_late": [0, 1, 0, 0],
+        "number_real_estate_loans_or_lines": [1, 0, 2, 0],
+        "number_of_time60_89_days_past_due_not_worse": [0, 0, 0, 1],
+        "number_of_dependents": [0, 0, 2, 1],
+    })
+    pipeline.fit(df_train, df_train["serious_dlqin_2yrs"])
+
+    with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        saved_path = pipeline.save(tmp_path)
+        assert saved_path.is_file()
+
+        loaded_pipeline = CreditRiskPipeline.load(tmp_path)
+        assert loaded_pipeline.optimal_threshold == pipeline.optimal_threshold
+
+        test_row = df_train.iloc[:2].copy()
+        orig_probs = pipeline.predict_proba(test_row)
+        loaded_probs = loaded_pipeline.predict_proba(test_row)
+        np.testing.assert_allclose(orig_probs, loaded_probs, rtol=1e-5)
+    finally:
+        import os
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def test_10_credit_risk_pipeline_batch_inference():
+    """Verify batch inference produces structured business decisions and risk tiers."""
+    from credit_risk.pipeline import CreditRiskPipeline
+
+    pipeline = CreditRiskPipeline.load()
+    sample = pd.DataFrame([
+        {
+            "applicant_id": 9991,
+            "revolving_utilization_of_unsecured_lines": 0.05,
+            "age": 62,
+            "number_of_time30_59_days_past_due_not_worse": 0,
+            "debt_ratio": 0.15,
+            "monthly_income": 9000.0,
+            "number_of_open_credit_lines_and_loans": 10,
+            "number_of_times90_days_late": 0,
+            "number_real_estate_loans_or_lines": 2,
+            "number_of_time60_89_days_past_due_not_worse": 0,
+            "number_of_dependents": 0,
+        },
+        {
+            "applicant_id": 9992,
+            "revolving_utilization_of_unsecured_lines": 0.95,
+            "age": 22,
+            "number_of_time30_59_days_past_due_not_worse": 3,
+            "debt_ratio": 0.65,
+            "monthly_income": 2000.0,
+            "number_of_open_credit_lines_and_loans": 3,
+            "number_of_times90_days_late": 1,
+            "number_real_estate_loans_or_lines": 0,
+            "number_of_time60_89_days_past_due_not_worse": 1,
+            "number_of_dependents": 0,
+        },
+    ])
+
+    decisions = pipeline.predict_decisions(sample)
+    assert len(decisions) == 2
+    assert "default_probability" in decisions.columns
+    assert "decision" in decisions.columns
+    assert "risk_tier" in decisions.columns
+
+    # Prime borrower should be approved with low risk
+    assert decisions.loc[0, "decision"] == "APPROVE"
+    assert decisions.loc[0, "risk_tier"] == "LOW_RISK"
+
+    # Distressed borrower should be declined
+    assert decisions.loc[1, "decision"] == "DECLINE"
+    assert decisions.loc[1, "predicted_default"] == 1
+
+
+def test_11_predict_file_and_cli():
+    """Verify predict_file and CLI entrypoint run on a file and produce output."""
+    import tempfile
+    from credit_risk.predict import main as predict_main, predict_file
+
+    sample = pd.DataFrame({
+        "applicant_id": [501, 502],
+        "revolving_utilization_of_unsecured_lines": [0.1, 0.8],
+        "age": [45, 23],
+        "number_of_time30_59_days_past_due_not_worse": [0, 1],
+        "debt_ratio": [0.2, 0.6],
+        "monthly_income": [5000.0, 2200.0],
+        "number_of_open_credit_lines_and_loans": [6, 2],
+        "number_of_times90_days_late": [0, 0],
+        "number_real_estate_loans_or_lines": [1, 0],
+        "number_of_time60_89_days_past_due_not_worse": [0, 0],
+        "number_of_dependents": [1, 0],
+    })
+
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as in_f:
+        in_path = in_f.name
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as out_f:
+        out_path = out_f.name
+
+    try:
+        sample.to_csv(in_path, index=False)
+        # Test predict_file directly
+        res = predict_file(in_path, out_path)
+        assert len(res) == 2
+        assert Path(out_path).is_file()
+
+        # Test CLI execution
+        ret = predict_main(["-i", in_path, "-o", out_path])
+        assert ret == 0
+
+        # Test CLI demo mode
+        demo_ret = predict_main(["--demo"])
+        assert demo_ret == 0
+    finally:
+        import os
+        for p in (in_path, out_path):
+            if os.path.exists(p):
+                os.remove(p)
+
