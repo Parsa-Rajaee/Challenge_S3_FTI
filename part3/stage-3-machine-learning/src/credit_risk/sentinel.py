@@ -135,6 +135,28 @@ def clean_sentinel_values(
         for c in resolved:
             out[c] = out[c].replace(list(SENTINEL_CODES), 0)
 
+    # Populate standardized clean past-due columns if not already present
+    c1_name = _resolve_col(out, "number_of_time30_59_days_past_due_not_worse")
+    c2_name = _resolve_col(out, "number_of_time60_89_days_past_due_not_worse")
+    c3_name = _resolve_col(out, "number_of_times90_days_late")
+
+    if "clean_num_30_59_days_late" not in out.columns and c1_name in out.columns:
+        out["clean_num_30_59_days_late"] = out[c1_name].replace(list(SENTINEL_CODES), np.nan)
+    if "clean_num_60_89_days_late" not in out.columns and c2_name in out.columns:
+        out["clean_num_60_89_days_late"] = out[c2_name].replace(list(SENTINEL_CODES), np.nan)
+    if "clean_num_90_days_late" not in out.columns and c3_name in out.columns:
+        out["clean_num_90_days_late"] = out[c3_name].replace(list(SENTINEL_CODES), np.nan)
+
+    if "clean_total_past_due_events" not in out.columns:
+        if all(c in out.columns for c in ("clean_num_30_59_days_late", "clean_num_60_89_days_late", "clean_num_90_days_late")):
+            out["clean_total_past_due_events"] = np.where(
+                sentinel_mask,
+                np.nan,
+                out["clean_num_30_59_days_late"].fillna(0)
+                + out["clean_num_60_89_days_late"].fillna(0)
+                + out["clean_num_90_days_late"].fillna(0),
+            )
+
     return out
 
 
