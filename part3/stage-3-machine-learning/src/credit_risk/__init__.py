@@ -13,6 +13,12 @@ from .cost import (
     find_optimal_threshold,
 )
 from .db import get_db_engine, load_clean_borrowers, load_raw_borrowers
+from .pipeline import (
+    FEATURE_COLUMNS,
+    CreditRiskPipeline,
+    train_and_save_production_model,
+)
+from .predict import predict_file
 from .sentinel import (
     SENTINEL_CODES,
     SentinelAuditor,
@@ -31,4 +37,8 @@ __all__ = [
     "SENTINEL_CODES",
     "SentinelAuditor",
     "clean_sentinel_values",
+    "FEATURE_COLUMNS",
+    "CreditRiskPipeline",
+    "train_and_save_production_model",
+    "predict_file",
 ]
