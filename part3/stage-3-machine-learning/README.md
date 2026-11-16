@@ -8,21 +8,27 @@ Production-grade cost-sensitive credit risk classification system built for the 
 
 ```
 part3/stage-3-machine-learning/
+├── artifacts/
+│   └── credit_risk_model.joblib # Serialized production pipeline & threshold artifact
 ├── data/
 │   ├── raw/                 # cs-training.csv, Data Dictionary.xls (Source files)
 │   └── curated/             # curated_records.csv, quality_report.json, run_manifest.json
+├── reports/
+│   └── figures/             # 14 publication-grade PNG visualizations
 ├── sql/
 │   ├── 001_credit_schema.sql # PostgreSQL DDL for credit.borrowers
 │   └── 002_credit_views.sql  # Database data preparation view (credit.vw_borrowers_clean)
 ├── src/
 │   └── credit_risk/
 │       ├── __init__.py
-│       ├── db.py            # SQLAlchemy relational data extraction
+│       ├── db.py            # SQLAlchemy relational data extraction with fallback
 │       ├── sentinel.py      # Credit bureau sentinel codes (96, 98) auditing & masking
 │       ├── cost.py          # Cost matrix evaluation (12:1 FN:FP) & threshold optimization
-│       └── features.py      # Feature engineering with pre-decision leakage audit
+│       ├── features.py      # Feature engineering with pre-decision leakage audit
+│       ├── pipeline.py      # Model training & artifact serialization pipeline
+│       └── predict.py       # Batch CLI inference and interactive demonstration
 ├── tests/
-│   └── test_credit_risk.py  # 8 comprehensive unit tests
+│   └── test_credit_risk.py  # 11 comprehensive unit tests
 ├── requirements.txt         # Pinned dependencies
 ├── pyproject.toml           # Editable package definition
 ├── report.md                # Comprehensive business and engineering report
@@ -48,12 +54,22 @@ python -m nyc311_factory --load-credit-csv part3/stage-3-machine-learning/data/r
 ```
 
 ### 3. Run Unit Tests
-Run the 8 required unit tests:
+Run the 11 comprehensive unit tests with pytest:
 ```powershell
 pytest part3/stage-3-machine-learning/tests
 ```
 
-### 4. Open Solution Notebook
+### 4. Batch Prediction CLI and Interactive Demo
+Run inference on new applicant data or view the demonstration mode:
+```powershell
+# Interactive demonstration
+python -m credit_risk.predict --demo
+
+# Batch prediction on a CSV file
+python -m credit_risk.predict --input path/to/applicants.csv --output path/to/decisions.csv
+```
+
+### 5. Open Solution Notebook
 Launch Jupyter to inspect or run `solution.ipynb`:
 ```powershell
 jupyter lab part3/stage-3-machine-learning/solution.ipynb
