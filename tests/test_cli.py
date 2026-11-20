@@ -94,13 +94,11 @@ class CliTests(unittest.TestCase):
             config_path = self.write_config(Path(directory))
             stderr = io.StringIO()
 
-            with redirect_stderr(stderr):
-                exit_code = main(
-                    ["--config", str(config_path), "--offline", "--count-only"]
-                )
-
-            self.assertEqual(exit_code, 4)
-            self.assertIn("only be used with the full factory", stderr.getvalue())
+            for step in (["--count-only"], ["--load-credit-csv", "borrowers.csv"]):
+                with self.subTest(step=step), redirect_stderr(stderr):
+                    exit_code = main(["--config", str(config_path), "--offline", *step])
+                    self.assertEqual(exit_code, 4)
+                    self.assertIn("only be used with the full factory", stderr.getvalue())
 
     def test_offline_mode_rejects_rolling_windows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -6,7 +6,6 @@ with cost-sensitive optimal decision thresholds.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,9 +102,9 @@ class CreditRiskPipeline:
         y_arr = np.asarray(y)
 
         self.classifier.fit(X_ready, y_arr)
-        train_probs = self.classifier.predict_proba(X_ready)[:, 1]
 
         if optimize_threshold:
+            train_probs = self.classifier.predict_proba(X_ready)[:, 1]
             best_th, min_cost, details = find_optimal_threshold(
                 y_arr, train_probs, cost_fp=self.cost_fp, cost_fn=self.cost_fn
             )
@@ -183,7 +182,7 @@ def train_and_save_production_model(
     test_size: float = 0.20,
     random_seed: int = 42,
 ) -> tuple[CreditRiskPipeline, dict[str, float]]:
-    """Train production HistGradientBoosting model, evaluate on holdout, and serialize."""
+    """Fit the model, select a threshold on calibration rows, and score the held-out test set."""
     df = load_clean_borrowers()
     target_col = "serious_dlqin_2yrs"
     if target_col not in df.columns:
@@ -194,37 +193,39 @@ def train_and_save_production_model(
         df, y, test_size=test_size, random_state=random_seed, stratify=y
     )
 
+    # Reserve calibration rows from training; only the final evaluation uses X_test.
+    X_fit, X_calibration, y_fit, y_calibration = train_test_split(
+        X_train, y_train, test_size=0.20, random_state=random_seed, stratify=y_train
+    )
     pipeline = CreditRiskPipeline()
-    pipeline.fit(X_train, y_train, optimize_threshold=False)
+    pipeline.fit(X_fit, y_fit, optimize_threshold=False)
+    costs = {"cost_fp": pipeline.cost_fp, "cost_fn": pipeline.cost_fn}
+    calibration_probs = pipeline.predict_proba(X_calibration)
+    best_th, calibration_cost, _ = find_optimal_threshold(y_calibration, calibration_probs, **costs)
 
-    # Optimize threshold strictly on validation / test split
     test_probs = pipeline.predict_proba(X_test)
     test_auc = float(roc_auc_score(y_test, test_probs))
-    best_th, min_cost, details = find_optimal_threshold(
-        y_test.values, test_probs, cost_fp=pipeline.cost_fp, cost_fn=pipeline.cost_fn
-    )
-
-    baseline_pred = np.zeros_like(y_test.values)
-    baseline_cost = calculate_expected_cost_per_thousand(
-        y_test.values, baseline_pred, cost_fp=pipeline.cost_fp, cost_fn=pipeline.cost_fn
-    )
-    cost_reduction = (1.0 - min_cost / baseline_cost) * 100.0
+    test_cost = calculate_expected_cost_per_thousand(y_test, test_probs >= best_th, **costs)
+    default_cost = calculate_expected_cost_per_thousand(y_test, test_probs >= 0.5, **costs)
+    baseline_cost = calculate_expected_cost_per_thousand(y_test, np.zeros_like(y_test), **costs)
+    cost_reduction = (1.0 - test_cost / baseline_cost) * 100.0
 
     pipeline.optimal_threshold = float(best_th)
     pipeline.metadata.update({
         "test_auc": test_auc,
-        "test_min_cost_per_thousand": float(min_cost),
+        "calibration_min_cost_per_thousand": float(calibration_cost),
+        "test_cost_per_thousand": float(test_cost),
         "baseline_cost_per_thousand": float(baseline_cost),
         "cost_reduction_pct": float(cost_reduction),
-        "default_0_5_cost_per_thousand": float(details["default_0_5_cost_per_thousand"]),
+        "default_0_5_cost_per_thousand": float(default_cost),
     })
 
-    saved_path = pipeline.save(output_path)
+    pipeline.save(output_path)
 
     metrics = {
         "auc": test_auc,
         "optimal_threshold": float(best_th),
-        "optimal_cost_per_thousand": float(min_cost),
+        "optimal_cost_per_thousand": float(test_cost),
         "baseline_cost_per_thousand": float(baseline_cost),
         "cost_reduction_pct": float(cost_reduction),
     }

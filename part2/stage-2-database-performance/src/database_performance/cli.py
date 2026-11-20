@@ -17,12 +17,25 @@ import sys
 from datetime import date
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point for the database-performance command-line utility."""
+def _add_load_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--raw-dir", default="data/raw", help="Path to raw CSV directory")
+    parser.add_argument("--batch-size", type=int, default=2000, help="Insert batch row chunk size")
+    parser.add_argument(
+        "--stage1-csv",
+        default="data/curated/curated_records.csv",
+        help="Stage 1 output to load into the separate nyc311 schema",
+    )
+    parser.add_argument(
+        "--skip-stage1",
+        action="store_true",
+        help="load Olist only, even if the Stage 1 curated CSV exists",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build and inspect the Stage 2 Olist database")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # 1. Subcommand: init-db
     init = subparsers.add_parser("init-db", help="create base Olist tables and analytics SQL")
     init.add_argument(
         "--reset",
@@ -30,40 +43,17 @@ def main(argv: list[str] | None = None) -> int:
         help="drop and recreate only the olist and analytics schemas",
     )
 
-    # 2. Subcommand: load
-    load = subparsers.add_parser("load", help="transactionally replace tables from nine Olist CSV files")
-    load.add_argument("--raw-dir", default="data/raw", help="Path to raw CSV directory")
-    load.add_argument("--batch-size", type=int, default=2000, help="Insert batch row chunk size")
-    load.add_argument(
-        "--stage1-csv",
-        default="data/curated/curated_records.csv",
-        help="Stage 1 output to load into the separate nyc311 schema",
+    load = subparsers.add_parser(
+        "load", help="transactionally replace tables from nine Olist CSV files"
     )
-    load.add_argument(
-        "--skip-stage1",
-        action="store_true",
-        help="load Olist only, even if the Stage 1 curated CSV exists",
-    )
+    _add_load_arguments(load)
 
-    # 3. Subcommand: build (End-to-End Orchestrator)
     build = subparsers.add_parser(
         "build",
         help="apply migrations and indexes, load Olist and Stage 1, rebuild snapshots",
     )
-    build.add_argument("--raw-dir", default="data/raw", help="Path to raw CSV directory")
-    build.add_argument("--batch-size", type=int, default=2000, help="Insert batch row chunk size")
-    build.add_argument(
-        "--stage1-csv",
-        default="data/curated/curated_records.csv",
-        help="Stage 1 output to load into the separate nyc311 schema",
-    )
-    build.add_argument(
-        "--skip-stage1",
-        action="store_true",
-        help="load Olist only, even if the Stage 1 curated CSV exists",
-    )
+    _add_load_arguments(build)
 
-    # 4. Subcommand: add-indexes
     indexes = subparsers.add_parser("add-indexes", help="apply candidate dashboard indexes")
     indexes.add_argument(
         "--include-candidates",
@@ -72,7 +62,6 @@ def main(argv: list[str] | None = None) -> int:
         help="acknowledge indexes have write and storage costs",
     )
 
-    # 5. Subcommand: benchmark
     benchmark = subparsers.add_parser("benchmark", help="measure each query and capture its plan")
     benchmark.add_argument(
         "--start-date",
@@ -93,17 +82,73 @@ def main(argv: list[str] | None = None) -> int:
         help="Number of query execution timing repetitions",
     )
 
+    return parser
+
+
+def _load_datasets(engine, args, url):
+    from .loader import apply_migrations, load_olist, rebuild_monthly_snapshots
+
+    if args.batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    stage1_path = os.path.abspath(args.stage1_csv)
+    if not args.skip_stage1 and not os.path.isfile(stage1_path):
+        raise FileNotFoundError(
+            "Stage 1 curated CSV is required; supply --stage1-csv, "
+            "run Stage 1 first, or explicitly use --skip-stage1"
+        )
+    include_indexes = args.command == "build"
+    apply_migrations(
+        engine,
+        include_indexes=include_indexes,
+        include_retirements=include_indexes,
+    )
+    result = load_olist(engine, args.raw_dir, batch_size=args.batch_size)
+    result["applied_indexes"] = include_indexes
+
+    # Load Stage 1 destination if available and not explicitly skipped
+    if args.skip_stage1:
+        result["stage1_destination"] = {"status": "skipped by request"}
+    elif os.path.isfile(stage1_path):
+        from nyc311_factory.database import load_curated_to_database
+
+        result["stage1_destination"] = load_curated_to_database(stage1_path, database_url=url)
+    else:
+        raise FileNotFoundError(
+            "Stage 1 curated CSV is required; supply --stage1-csv, "
+            "run Stage 1 first, or explicitly use --skip-stage1"
+        )
+
+    # Rebuild snapshot table when building fully
+    if args.command == "build":
+        rebuild_monthly_snapshots(engine)
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for statement in (
+                "VACUUM (ANALYZE) olist.orders",
+                "VACUUM (ANALYZE) olist.order_items",
+                "VACUUM (ANALYZE) olist.order_payments",
+                "VACUUM (ANALYZE) olist.order_reviews",
+            ):
+                connection.exec_driver_sql(statement)
+        result["monthly_snapshot"] = "rebuilt"
+
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     url = os.environ.get("DATABASE_URL")
     if not url:
-        parser.error("Set DATABASE_URL to a PostgreSQL SQLAlchemy URL (e.g. postgresql://user:pass@host:5432/db)")
+        parser.error(
+            "Set DATABASE_URL to a PostgreSQL SQLAlchemy URL (e.g. postgresql://user:pass@host:5432/db)"
+        )
 
     try:
         from sqlalchemy import create_engine, text
 
         from .benchmark import benchmark_queries, database_sizes
-        from .loader import apply_migrations, load_olist, rebuild_monthly_snapshots
+        from .loader import apply_migrations
 
         engine = create_engine(url, pool_pre_ping=True)
         try:
@@ -116,46 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"applied_migrations": apply_migrations(engine)}, indent=2))
 
             elif args.command in {"load", "build"}:
-                stage1_path = os.path.abspath(args.stage1_csv)
-                if not args.skip_stage1 and not os.path.isfile(stage1_path):
-                    raise FileNotFoundError(
-                        "Stage 1 curated CSV is required; supply --stage1-csv, "
-                        "run Stage 1 first, or explicitly use --skip-stage1"
-                    )
-                include_indexes = args.command == "build"
-                apply_migrations(
-                    engine, include_indexes=include_indexes,
-                    include_retirements=include_indexes,
-                )
-                result = load_olist(engine, args.raw_dir, batch_size=args.batch_size)
-                result["applied_indexes"] = include_indexes
-
-                # Load Stage 1 destination if available and not explicitly skipped
-                if args.skip_stage1:
-                    result["stage1_destination"] = {"status": "skipped by request"}
-                elif os.path.isfile(stage1_path):
-                    from nyc311_factory.database import load_curated_to_database
-
-                    result["stage1_destination"] = load_curated_to_database(stage1_path, database_url=url)
-                else:
-                    raise FileNotFoundError(
-                        "Stage 1 curated CSV is required; supply --stage1-csv, "
-                        "run Stage 1 first, or explicitly use --skip-stage1"
-                    )
-
-                # Rebuild snapshot table when building fully
-                if args.command == "build":
-                    rebuild_monthly_snapshots(engine)
-                    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-                        for statement in (
-                            "VACUUM (ANALYZE) olist.orders",
-                            "VACUUM (ANALYZE) olist.order_items",
-                            "VACUUM (ANALYZE) olist.order_payments",
-                            "VACUUM (ANALYZE) olist.order_reviews",
-                        ):
-                            connection.exec_driver_sql(statement)
-                    result["monthly_snapshot"] = "rebuilt"
-
+                result = _load_datasets(engine, args, url)
                 print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
             elif args.command == "add-indexes":

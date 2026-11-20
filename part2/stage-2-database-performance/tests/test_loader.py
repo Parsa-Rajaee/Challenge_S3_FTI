@@ -13,6 +13,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import text
 
 from database_performance.benchmark import Explain
+from database_performance.cli import build_parser, _load_datasets
 from database_performance.loader import (
     ANALYZE_OLIST_SQL,
     REBUILD_SNAPSHOTS_SQL,
@@ -26,6 +27,11 @@ class LoaderGuardTests(unittest.TestCase):
     def test_nonpositive_batch_size_is_rejected_before_database_access(self):
         with self.assertRaisesRegex(ValueError, "batch_size must be positive"):
             load_olist(None, ".", batch_size=0)
+
+    def test_invalid_build_batch_size_is_rejected_before_migrations(self):
+        args = build_parser().parse_args(["build", "--skip-stage1", "--batch-size", "-1"])
+        with self.assertRaisesRegex(ValueError, "batch_size must be positive"):
+            _load_datasets(None, args, "")
 
     def test_missing_source_files_are_reported_before_database_access(self):
         with tempfile.TemporaryDirectory() as directory:

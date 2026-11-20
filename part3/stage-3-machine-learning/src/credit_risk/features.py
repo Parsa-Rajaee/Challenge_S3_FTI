@@ -11,27 +11,9 @@ import pandas as pd
 
 
 def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute 4 domain-justified features with zero lookahead leakage.
+    """Add four features from debt, income and credit history at application time.
 
-    Feature 1: debt_to_income_dollars
-      - Hypothesis: Absolute monthly debt obligations in dollars measure cash-flow
-        fragility more accurately than ratios alone.
-      - Availability: Verified at loan application via payslips and credit bureau debts.
-
-    Feature 2: utilization_per_line
-      - Hypothesis: High revolving utilization concentrated across few open accounts
-        signals credit card balance distress rather than dispersed operational credit.
-      - Availability: Reported by credit bureau at application time.
-
-    Feature 3: unsecured_to_total_lines_ratio
-      - Hypothesis: Higher proportion of unsecured credit lines compared to secured real
-        estate mortgages reflects higher credit risk.
-      - Availability: Reported in credit bureau tradeline summary.
-
-    Feature 4: clean_past_due_total
-      - Hypothesis: Total non-sentinel past-due delinquency events across 30-59, 60-89,
-        and 90+ buckets capture cumulative delinquency history.
-      - Availability: Historical bureau delinquency record prior to application.
+    Accept both the original CSV headers and the database column names.
     """
     out = df.copy()
 
@@ -72,13 +54,16 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
         out["clean_past_due_total"] = out["clean_total_past_due_events"].fillna(0.0)
     else:
         # Compute from raw if clean columns are absent
-        c1 = out.get("number_of_time30_59_days_past_due_not_worse", out.get("NumberOfTime30-59DaysPastDueNotWorse", 0))
-        c2 = out.get("number_of_time60_89_days_past_due_not_worse", out.get("NumberOfTime60-89DaysPastDueNotWorse", 0))
-        c3 = out.get("number_of_times90_days_late", out.get("NumberOfTimes90DaysLate", 0))
-        # Mask sentinels
-        m1 = np.where(np.isin(c1, (96, 98)), 0, c1)
-        m2 = np.where(np.isin(c2, (96, 98)), 0, c2)
-        m3 = np.where(np.isin(c3, (96, 98)), 0, c3)
-        out["clean_past_due_total"] = m1 + m2 + m3
+        late_payment_columns = (
+            ("number_of_time30_59_days_past_due_not_worse", "NumberOfTime30-59DaysPastDueNotWorse"),
+            ("number_of_time60_89_days_past_due_not_worse", "NumberOfTime60-89DaysPastDueNotWorse"),
+            ("number_of_times90_days_late", "NumberOfTimes90DaysLate"),
+        )
+        total = 0
+        for database_name, csv_name in late_payment_columns:
+            counts = out.get(database_name, out.get(csv_name, 0))
+            # Codes 96 and 98 indicate missing payment history.
+            total = total + np.where(np.isin(counts, (96, 98)), 0, counts)
+        out["clean_past_due_total"] = total
 
     return out
