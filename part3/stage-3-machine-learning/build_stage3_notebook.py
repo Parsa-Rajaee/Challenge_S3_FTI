@@ -84,27 +84,8 @@ np.random.seed(RANDOM_SEED)
 # ---------------------------------------------------------
 # پیکربندی تم زیبا و استاندارد Seaborn برای مصورسازی‌های مالی
 # ---------------------------------------------------------
-sns.set_theme(style="whitegrid", font_scale=1.05)
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "figure.figsize": (11, 5.5),
-    "figure.dpi": 130,
-    "savefig.dpi": 300,
-    "axes.titlesize": 13,
-    "axes.titleweight": "bold",
-    "axes.labelsize": 11,
-    "axes.labelweight": "semibold",
-    "xtick.labelsize": 10,
-    "ytick.labelsize": 10,
-    "legend.fontsize": 10,
-    "legend.frameon": True,
-    "legend.framealpha": 0.92,
-    "grid.color": "#E2E8F0",
-    "grid.linestyle": "--",
-    "grid.alpha": 0.7,
-    "axes.edgecolor": "#CBD5E1",
-    "axes.linewidth": 1.1,
-})
+sns.set_theme(style="darkgrid")
+plt.rcParams.update({"figure.figsize": (11, 5.5), "figure.dpi": 130, "savefig.dpi": 300})
 
 # تعریف پالت رنگی حرفه‌ای (Navy / Blue / Red / Emerald / Amber)
 NAVY = "#1E3A8A"
@@ -256,17 +237,18 @@ continuous_vars = [
     ("unsecured_to_total_lines_ratio", "Engineered: Unsecured Line Ratio", (0, 1.0), df_feat["unsecured_to_total_lines_ratio"], "Proportion [0, 1]"),
 ]
 
-for ax, (col, title, xlim, data, xlabel) in zip(axes, continuous_vars):
+colors = sns.color_palette("Dark2", 8) + [sns.color_palette("deep")[4]]
+for ax, color, (col, title, xlim, data, xlabel) in zip(axes, colors, continuous_vars):
     sub = data[(data >= xlim[0]) & (data <= xlim[1])]
     sns.histplot(
         sub,
         kde=True,
         ax=ax,
-        color=BLUE,
+        color=color,
         edgecolor="#1E293B",
         alpha=0.55,
         bins=30,
-        line_kws={"linewidth": 2, "color": NAVY}
+        line_kws={"linewidth": 2}
     )
     med = sub.median()
     mean = sub.mean()
@@ -441,7 +423,7 @@ plt.show()"""
             """# بررسی توزیع سنی و تغییر ماهیت نسبت بدهی
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.5))
 
-sns.histplot(df["age"], bins=40, kde=True, color=BLUE, ax=ax1, edgecolor="#1E293B", alpha=0.6)
+sns.histplot(df["age"], bins=40, kde=True, color=sns.color_palette("Dark2")[0], ax=ax1, edgecolor="#1E293B", alpha=0.6)
 ax1.set_title("Borrower Age Distribution & Sentinel Outlier", fontsize=13, fontweight="bold", pad=12)
 ax1.set_xlabel("Applicant Age (Years)", fontsize=11, fontweight="semibold")
 ax1.set_ylabel("Applicant Frequency", fontsize=11, fontweight="semibold")
