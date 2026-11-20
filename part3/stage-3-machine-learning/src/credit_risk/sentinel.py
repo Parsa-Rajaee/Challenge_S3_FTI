@@ -28,64 +28,46 @@ RAW_LATE_COLUMNS: tuple[str, ...] = (
 )
 
 
-def _resolve_col(df: pd.DataFrame, col: str) -> str:
-    if col in df.columns:
-        return col
-    # Check lowercase / snake_case mapping
-    mapping = {
-        "NumberOfTime30-59DaysPastDueNotWorse": "number_of_time30_59_days_past_due_not_worse",
-        "NumberOfTime60-89DaysPastDueNotWorse": "number_of_time60_89_days_past_due_not_worse",
-        "NumberOfTimes90DaysLate": "number_of_times90_days_late",
-        "raw_num_30_59_days_late": "number_of_time30_59_days_past_due_not_worse",
-        "raw_num_60_89_days_late": "number_of_time60_89_days_past_due_not_worse",
-        "raw_num_90_days_late": "number_of_times90_days_late",
-    }
-    for k, v in mapping.items():
-        if col in (k, v):
-            if k in df.columns:
-                return k
-            if v in df.columns:
-                return v
-    return col
+VIEW_RAW_COLUMNS = (
+    "raw_num_30_59_days_late",
+    "raw_num_60_89_days_late",
+    "raw_num_90_days_late",
+)
+
+
+def _late_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Map each payment period to its original count, even on prepared frames."""
+    columns = {}
+    for canonical, csv_name, view_name in zip(LATE_COLUMNS, RAW_LATE_COLUMNS, VIEW_RAW_COLUMNS):
+        for name in (view_name, canonical, csv_name):
+            if name in df:
+                columns[canonical] = name
+                break
+    return columns
 
 
 class SentinelAuditor:
-    """Audits credit bureau sentinel values (96, 98) and domain anomalies."""
+    """Audit credit bureau codes 96 and 98 and count domain anomalies."""
 
     @staticmethod
     def audit(df: pd.DataFrame) -> dict[str, Any]:
-        """Perform full inspection of sentinel values across delinquency columns."""
-        resolved = [_resolve_col(df, c) for c in LATE_COLUMNS if _resolve_col(df, c) in df.columns]
+        resolved = list(_late_columns(df).values())
+        counts = df[resolved]
+        sentinel_mask = counts.isin(SENTINEL_CODES).any(axis=1)
+        counts_96 = (counts == 96).sum().astype(int).to_dict()
+        counts_98 = (counts == 98).sum().astype(int).to_dict()
+        all_96 = int((counts == 96).all(axis=1).sum()) if len(resolved) == 3 else 0
+        all_98 = int((counts == 98).all(axis=1).sum()) if len(resolved) == 3 else 0
+        any_sentinel = int(sentinel_mask.sum())
 
-        counts_96: dict[str, int] = {}
-        counts_98: dict[str, int] = {}
-        for c in resolved:
-            counts_96[c] = int((df[c] == 96).sum())
-            counts_98[c] = int((df[c] == 98).sum())
-
-        # Check co-occurrence
-        if len(resolved) == 3:
-            c1, c2, c3 = resolved
-            all_98 = int(((df[c1] == 98) & (df[c2] == 98) & (df[c3] == 98)).sum())
-            all_96 = int(((df[c1] == 96) & (df[c2] == 96) & (df[c3] == 96)).sum())
-            any_sentinel = int(
-                ((df[c1].isin(SENTINEL_CODES)) | (df[c2].isin(SENTINEL_CODES)) | (df[c3].isin(SENTINEL_CODES))).sum()
-            )
-        else:
-            all_98 = 0
-            all_96 = 0
-            any_sentinel = sum(counts_96.values()) + sum(counts_98.values())
-
-        # Target delinquency rate among sentinel vs non-sentinel
-        target_col = "serious_dlqin_2yrs" if "serious_dlqin_2yrs" in df.columns else "SeriousDlqin2yrs"
+        target_col = "serious_dlqin_2yrs" if "serious_dlqin_2yrs" in df else "SeriousDlqin2yrs"
         sentinel_default_rate = None
         normal_default_rate = None
-        if target_col in df.columns and len(resolved) == 3:
-            c1, c2, c3 = resolved
-            sentinel_mask = (df[c1].isin(SENTINEL_CODES)) | (df[c2].isin(SENTINEL_CODES)) | (df[c3].isin(SENTINEL_CODES))
-            if sentinel_mask.sum() > 0:
+        if target_col in df and len(resolved) == 3:
+            if sentinel_mask.any():
                 sentinel_default_rate = float(df.loc[sentinel_mask, target_col].mean())
-            normal_default_rate = float(df.loc[~sentinel_mask, target_col].mean())
+            if (~sentinel_mask).any():
+                normal_default_rate = float(df.loc[~sentinel_mask, target_col].mean())
 
         # Domain anomalies
         age_col = "age" if "age" in df.columns else None
@@ -116,7 +98,8 @@ def clean_sentinel_values(
 ) -> pd.DataFrame:
     """Return a DataFrame copy with sentinel values handled according to strategy."""
     out = df.copy()
-    resolved = [_resolve_col(out, c) for c in LATE_COLUMNS if _resolve_col(out, c) in out.columns]
+    columns = _late_columns(out)
+    resolved = list(columns.values())
 
     if not resolved:
         return out
@@ -136,26 +119,15 @@ def clean_sentinel_values(
             out[c] = out[c].replace(list(SENTINEL_CODES), 0)
 
     # Populate standardized clean past-due columns if not already present
-    c1_name = _resolve_col(out, "number_of_time30_59_days_past_due_not_worse")
-    c2_name = _resolve_col(out, "number_of_time60_89_days_past_due_not_worse")
-    c3_name = _resolve_col(out, "number_of_times90_days_late")
+    for canonical, alias in zip(LATE_COLUMNS, VIEW_RAW_COLUMNS):
+        cleaned_name = alias.replace("raw_", "clean_", 1)
+        if cleaned_name not in out and canonical in columns:
+            out[cleaned_name] = out[columns[canonical]].replace(list(SENTINEL_CODES), np.nan)
 
-    if "clean_num_30_59_days_late" not in out.columns and c1_name in out.columns:
-        out["clean_num_30_59_days_late"] = out[c1_name].replace(list(SENTINEL_CODES), np.nan)
-    if "clean_num_60_89_days_late" not in out.columns and c2_name in out.columns:
-        out["clean_num_60_89_days_late"] = out[c2_name].replace(list(SENTINEL_CODES), np.nan)
-    if "clean_num_90_days_late" not in out.columns and c3_name in out.columns:
-        out["clean_num_90_days_late"] = out[c3_name].replace(list(SENTINEL_CODES), np.nan)
-
-    if "clean_total_past_due_events" not in out.columns:
-        if all(c in out.columns for c in ("clean_num_30_59_days_late", "clean_num_60_89_days_late", "clean_num_90_days_late")):
-            out["clean_total_past_due_events"] = np.where(
-                sentinel_mask,
-                np.nan,
-                out["clean_num_30_59_days_late"].fillna(0)
-                + out["clean_num_60_89_days_late"].fillna(0)
-                + out["clean_num_90_days_late"].fillna(0),
-            )
+    clean_counts = [alias.replace("raw_", "clean_", 1) for alias in VIEW_RAW_COLUMNS]
+    if "clean_total_past_due_events" not in out and all(name in out for name in clean_counts):
+        total = out[clean_counts].sum(axis=1)
+        out["clean_total_past_due_events"] = total.mask(sentinel_mask)
 
     return out
 

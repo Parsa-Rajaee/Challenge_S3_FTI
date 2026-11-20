@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings(args.config)
         if args.offline and any(
             (args.count_only, args.download_only, args.curate_only, args.analyze_only,
-             args.load_curated_to_database)
+             args.load_curated_to_database, args.load_credit_csv)
         ):
             raise DataValidationError("--offline can only be used with the full factory")
         if args.offline and args.rolling_window_days is not None:

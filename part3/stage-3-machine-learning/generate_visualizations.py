@@ -239,7 +239,9 @@ def plot_fig2_sentinels(df: pd.DataFrame) -> None:
     ax1.text(
         0.5,
         0.72,
-        "Exact Co-occurrence:\nAll 264 rows have 98 in all 3 cols\nAll 5 rows have 96 in all 3 cols",
+        "Code in all three fields\n"
+        f"98: {audit['exact_concordance_all_98']:,} borrowers\n"
+        f"96: {audit['exact_concordance_all_96']:,} borrowers",
         transform=ax1.transAxes,
         ha="center",
         bbox=dict(boxstyle="round,pad=0.5", facecolor="#FEF3C7", edgecolor=AMBER, alpha=0.9),
@@ -248,39 +250,33 @@ def plot_fig2_sentinels(df: pd.DataFrame) -> None:
 
     # Right: Default Rate Divergence
     groups = ["Normal Borrowers\n(No Sentinel Code)", "Sentinel Borrowers\n(Codes 96 or 98)"]
-    rates = [audit["normal_default_rate"] * 100, audit["sentinel_default_rate"] * 100]
+    rates = [
+        100 * rate if rate is not None else np.nan
+        for rate in (audit["normal_default_rate"], audit["sentinel_default_rate"])
+    ]
 
     bars2 = ax2.bar(groups, rates, color=[BLUE, RED], width=0.5, edgecolor="#1E293B", linewidth=1.2)
     ax2.set_ylabel("Serious Default Rate (%)", fontsize=11, fontweight="semibold")
     ax2.set_title(
-        "The 8.28x Risk Surge: Default Rate by Sentinel Status",
+        "Default Rate by Sentinel Status",
         fontsize=13,
         fontweight="bold",
         pad=12,
     )
-    ax2.set_ylim(0, 70)
+    finite_rates = [rate for rate in rates if np.isfinite(rate)]
+    ax2.set_ylim(0, max(70, max(finite_rates, default=0) + 10))
 
     for bar, rate in zip(bars2, rates):
-        h = bar.get_height()
         ax2.text(
             bar.get_x() + bar.get_width() / 2,
-            h + 2.5,
-            f"{rate:.2f}%",
+            rate + 2.5 if np.isfinite(rate) else 2.5,
+            f"{rate:.2f}%" if np.isfinite(rate) else "No borrowers",
             ha="center",
             fontweight="bold",
             fontsize=11,
         )
 
-    ax2.annotate(
-        "8.28x Higher Risk!\nEssential Predictive Signal",
-        xy=(1, rates[1]),
-        xytext=(0.55, 60),
-        arrowprops=dict(facecolor=CRIMSON, shrink=0.08, width=2, headwidth=8),
-        fontsize=10.5,
-        fontweight="bold",
-        color=CRIMSON,
-        bbox=dict(boxstyle="round,pad=0.4", facecolor="#FEE2E2", edgecolor=RED),
-    )
+
 
     plt.tight_layout()
     fig.savefig(FIG_DIR / "fig02_sentinel_codes_analysis.png")
@@ -1346,7 +1342,7 @@ def main():
     t0 = time.time()
 
     df = load_clean_borrowers()
-    print(f"Data loaded from PostgreSQL: {len(df):,} records in {time.time() - t0:.2f}s")
+    print(f"Loaded borrower records: {len(df):,} records in {time.time() - t0:.2f}s")
 
     # 1. Target Imbalance
     plot_fig1_target_imbalance_and_cost(df)

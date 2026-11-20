@@ -24,6 +24,8 @@ The view also flags missing income and dependent counts, ages below 18, and case
 
 A false positive costs one unit in the challenge. A false negative costs 12. For example, missing two defaults and flagging three borrowers who repay costs 27 units. The analysis tries a range of probability thresholds, counts both types of error, and reports cost per 1,000 applicants so results are comparable across samples.
 
-The prediction command reads a saved model and threshold. The executed notebook contains the model comparison, threshold curve, and subgroup results. The README has commands for running the demo, scoring a file, and testing the package.
+The notebook reports the minimum cost found on its threshold-selection sample. Use that number to compare candidate thresholds. To estimate performance on unseen borrowers, the production training function reserves a separate test set. With its defaults, it fits on 64% of borrowers, chooses the threshold on 16%, and measures the cost of that fixed threshold on the remaining 20%.
+
+A fresh run on all 150,000 records measured 360.6 cost units per 1,000 applicants on the 30,000-row test set. Predicting repayment for everyone cost 802.0 units on the same rows. The prediction demo uses the previously saved model and threshold. The executed notebook contains the model comparison, threshold curve, and subgroup results. The README has commands for running the demo, scoring a file, and testing the package.
 
 [Cost calculation](src/credit_risk/cost.py) · [Executed notebook](solution.ipynb) · [Setup and commands](README.md)

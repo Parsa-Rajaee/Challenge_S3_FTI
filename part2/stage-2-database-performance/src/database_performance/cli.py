@@ -88,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _load_datasets(engine, args, url):
     from .loader import apply_migrations, load_olist, rebuild_monthly_snapshots
 
+    if args.batch_size < 1:
+        raise ValueError("batch_size must be positive")
     stage1_path = os.path.abspath(args.stage1_csv)
     if not args.skip_stage1 and not os.path.isfile(stage1_path):
         raise FileNotFoundError(

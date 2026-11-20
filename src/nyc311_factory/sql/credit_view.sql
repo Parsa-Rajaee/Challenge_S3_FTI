@@ -23,7 +23,10 @@ SELECT
         ELSE number_of_times90_days_late
     END AS clean_num_90_days_late,
     CASE
-        WHEN number_of_time30_59_days_past_due_not_worse IN (96, 98) THEN NULL
+        WHEN number_of_time30_59_days_past_due_not_worse IN (96, 98)
+          OR number_of_time60_89_days_past_due_not_worse IN (96, 98)
+          OR number_of_times90_days_late IN (96, 98)
+        THEN NULL
         ELSE (
             number_of_time30_59_days_past_due_not_worse +
             number_of_time60_89_days_past_due_not_worse +

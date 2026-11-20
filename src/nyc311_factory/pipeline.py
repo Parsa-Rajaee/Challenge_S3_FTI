@@ -77,17 +77,20 @@ class RawDownloader:
         except (OSError, json.JSONDecodeError) as exc:
             raise CheckpointError(f"Cannot read checkpoint {path}: {exc}") from exc
         # Refuse to resume if the saved checkpoint was made with different settings.
+        if not isinstance(checkpoint, dict):
+            raise CheckpointError("Checkpoint must be a JSON object")
         if checkpoint.get("signature") != self.settings.source_signature:
             raise CheckpointError(
                 "Checkpoint settings differ from this run; archive the raw directory "
                 "before starting a different source slice"
             )
-        try:
-            next_offset = int(checkpoint["next_offset"])
-            raw_count = int(checkpoint["raw_count"])
-            complete = bool(checkpoint["complete"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise CheckpointError(f"Checkpoint fields are invalid: {exc}") from exc
+        next_offset = checkpoint.get("next_offset")
+        raw_count = checkpoint.get("raw_count")
+        complete = checkpoint.get("complete")
+        if type(next_offset) is not int or type(raw_count) is not int:
+            raise CheckpointError("Checkpoint offsets and counts must be integers")
+        if not isinstance(complete, bool):
+            raise CheckpointError("Checkpoint completion flag must be true or false")
         if next_offset < 0 or raw_count != next_offset:
             raise CheckpointError("Checkpoint offsets and raw row count are inconsistent")
         # Every page the checkpoint claims to have written must exist on disk.
