@@ -303,3 +303,64 @@ def test_11_predict_file_and_cli():
             if os.path.exists(p):
                 os.remove(p)
 
+
+
+
+def test_offline_rows_keep_raw_codes_through_feature_preparation():
+    from unittest.mock import Mock
+    from sqlalchemy.exc import OperationalError
+    from credit_risk.pipeline import CreditRiskPipeline
+
+    offline = Mock()
+    offline.connect.side_effect = OperationalError("connect", {}, OSError("offline"))
+    frame = load_clean_borrowers(offline, limit=5000)
+    audit = SentinelAuditor.audit(frame)
+    flagged = frame["raw_num_90_days_late"].isin(SENTINEL_CODES)
+    assert flagged.any()
+    assert audit["total_sentinel_rows"] == flagged.sum()
+    assert audit["sentinel_default_rate"] == frame.loc[flagged, "serious_dlqin_2yrs"].mean()
+    features = CreditRiskPipeline().prepare_features(frame)
+    assert features.loc[flagged, "has_sentinel_late_code"].eq(1).all()
+    assert features.loc[flagged, "clean_num_90_days_late"].isna().all()
+
+
+def test_query_error_is_visible_even_when_fallback_enabled():
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import OperationalError
+
+    engine = create_engine("sqlite://")
+    try:
+        with pytest.raises(OperationalError, match="no such table"):
+            load_clean_borrowers(engine, limit=1)
+    finally:
+        engine.dispose()
+
+
+def test_production_fit_calibration_and_test_sets_are_disjoint(monkeypatch, tmp_path):
+    from unittest.mock import patch
+    from credit_risk import pipeline
+
+    source = Path(__file__).resolve().parents[1] / "data/curated/curated_records.csv"
+    frame = pd.read_csv(source, nrows=1000)
+    monkeypatch.setattr(pipeline, "load_clean_borrowers", lambda: frame)
+    with (
+        patch.object(pipeline, "find_optimal_threshold", wraps=find_optimal_threshold) as select,
+        patch.object(pipeline, "calculate_expected_cost_per_thousand",
+                     wraps=calculate_expected_cost_per_thousand) as evaluate,
+        patch.object(pipeline.CreditRiskPipeline, "fit", autospec=True,
+                     side_effect=pipeline.CreditRiskPipeline.fit) as fit,
+    ):
+        model, metrics = pipeline.train_and_save_production_model(tmp_path / "model.joblib")
+
+    training = set(fit.call_args.args[1].index)
+    calibration = set(select.call_args.args[0].index)
+    test_labels, test_predictions = evaluate.call_args_list[0].args
+    testing = set(test_labels.index)
+    assert training.isdisjoint(calibration) and training.isdisjoint(testing)
+    assert calibration.isdisjoint(testing)
+    assert training | calibration | testing == set(frame.index)
+    expected = model.predict_proba(frame.loc[test_labels.index]) >= model.optimal_threshold
+    np.testing.assert_array_equal(test_predictions, expected)
+    assert metrics["optimal_cost_per_thousand"] == calculate_expected_cost_per_thousand(
+        test_labels, expected
+    )

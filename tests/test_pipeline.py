@@ -30,6 +30,19 @@ def make_settings(root: Path, target: int = 0) -> Settings:
 
 
 class RawDownloaderTests(unittest.TestCase):
+    def test_invalid_checkpoint_types_cannot_authorize_offline_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = make_settings(Path(directory))
+            settings.raw_dir.mkdir(parents=True)
+            checkpoint = dict(signature=settings.source_signature, raw_count=0, next_offset=0,
+                              complete=True)
+            for invalid in ([], {**checkpoint, "complete": "false"},
+                            {**checkpoint, "next_offset": 0.9}, {**checkpoint, "raw_count": False}):
+                with self.subTest(checkpoint=invalid):
+                    settings.checkpoint_path.write_text(json.dumps(invalid), encoding="utf-8")
+                    with self.assertRaises(CheckpointError):
+                        RawDownloader(settings, Mock()).run(offline=True)
+
     def test_writes_pages_and_completes_on_short_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings = make_settings(Path(directory))
