@@ -1,76 +1,29 @@
-# Stage 3: Machine Learning & Relational Integration Guide
-*Cost-Sensitive Credit Risk Default Prediction & Sentinel Values Auditing*
+# How the credit-risk project works
 
----
+The training data contains one row per applicant. The model estimates whether that person will experience serious delinquency within two years. A separate decision rule turns that probability into a prediction.
 
-## 1. Executive Summary & Challenge Objectives
+## Follow a borrower from CSV to model input
 
-In **Stage 1**, we built a resilient ingestion and curation pipeline (`nyc311-data-factory`).  
-In **Stage 2**, we implemented a high-performance relational schema and database tuning in PostgreSQL (`nyc311-database-performance`).  
-In **Stage 3**, we unify data engineering with machine learning:
-1. **Chain Requirement**: Data is strictly loaded via the Stage 1 package into PostgreSQL (`credit.borrowers`) and queried by SQLAlchemy from an analytical view (`credit.vw_borrowers_clean`). The notebook never touches flat CSV files directly.
-2. **In-Database Preparation**: Data cleaning and domain sentinel value detection are executed inside PostgreSQL using declarative SQL views.
-3. **Credit Bureau Sentinel Values**: Specialized codes (`96` and `98`) in delinquency columns are audited, showing a striking **54.65% default rate** (vs 6.60% in general borrowers). They are transformed into binary indicator signals while numeric columns are masked to prevent model distortion.
-4. **Cost-Sensitive Decision Making**: A severe asymmetric business loss matrix ($C(\text{FN}) = 12$ vs $C(\text{FP}) = 1$) dictates threshold optimization rather than default $0.5$ probability cutoffs.
+1. The factory reads the CSV, converts each field to its declared type, and checks the target, age, and account counts. It records rejected rows and their reasons in `quarantine.jsonl`.
+2. It loads accepted records into `credit.borrowers`. The applicant ID is the primary key, so loading the same applicant again updates that row. The quality report counts accepted and rejected records. The run manifest records the source and output hashes.
+3. The notebook requests `credit.vw_borrowers_clean` through SQLAlchemy. The view keeps the original late-payment values for auditing and adds cleaned values for modeling.
 
----
+[CSV loader](../../src/nyc311_factory/credit_factory.py) · [Table definition](../../src/nyc311_factory/sql/credit_schema.sql) · [View definition](../../src/nyc311_factory/sql/credit_view.sql)
 
-## 2. Relational Schema & View Architecture
+## Why the late-payment fields need special handling
 
-### Schema: `credit.borrowers`
-```sql
-CREATE TABLE credit.borrowers (
-    applicant_id INTEGER PRIMARY KEY,
-    serious_dlqin_2yrs INTEGER NOT NULL CHECK (serious_dlqin_2yrs IN (0, 1)),
-    revolving_utilization_of_unsecured_lines NUMERIC,
-    age INTEGER NOT NULL CHECK (age >= 0),
-    number_of_time30_59_days_past_due_not_worse INTEGER NOT NULL,
-    debt_ratio NUMERIC,
-    monthly_income NUMERIC(14, 2),
-    number_of_open_credit_lines_and_loans INTEGER NOT NULL,
-    number_of_times90_days_late INTEGER NOT NULL,
-    number_real_estate_loans_or_lines INTEGER NOT NULL,
-    number_of_time60_89_days_past_due_not_worse INTEGER NOT NULL,
-    number_of_dependents INTEGER,
-    ingested_at_utc TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-```
+In the 150,000-row training set, 264 borrowers have 98 in all three late-payment fields and five have 96 in all three. For those 269 borrowers, the observed default rate was 54.65%. For the remaining borrowers it was 6.60%.
 
-### In-Database Data Preparation View: `credit.vw_borrowers_clean`
-The view encapsulates:
-- `has_sentinel_late_code`: Evaluates `TRUE` if `number_of_time30_59_days_past_due_not_worse IN (96, 98)` or any other past-due column contains 96 or 98.
-- `clean_num_30_59_days_late`, `clean_num_60_89_days_late`, `clean_num_90_days_late`: Converts sentinel numbers to `NULL`.
-- `clean_total_past_due_events`: Aggregates non-sentinel past due events.
-- `is_monthly_income_missing`: Boolean flag for missing income ($29,731$ rows).
-- `is_impossible_age`: Flags applicants with `age < 18` (1 applicant with age 0).
-- `is_debt_ratio_as_dollar_amount`: Flags rows where `debt_ratio` represents dollar payments instead of percentage.
+Treating 98 as a count of late payments would give it a misleading numerical weight. The view replaces each special code with SQL `NULL` in the cleaned count and sets `has_sentinel_late_code`. This lets the model distinguish a flagged record from one with an ordinary payment history.
 
----
+The view also flags missing income and dependent counts, ages below 18, and cases where income is missing and the debt ratio exceeds one. The training data contains 29,731 records with missing income and one record with age zero.
 
-## 3. Sentinel Values Deep Dive
+[Sentinel audit](src/credit_risk/sentinel.py) · [Feature calculations](src/credit_risk/features.py)
 
-### What Are Codes 96 and 98?
-In credit reporting standards (e.g., Metro 2 format):
-- **Code 96**: Indicates that credit history could not be verified, or tradelines are frozen/under formal dispute.
-- **Code 98**: Indicates no data available / system error / unverified status.
+## How a probability becomes a decision
 
-### Empirical Findings:
-- Total records: **150,000**
-- Sentinel 98 occurrences: **264** across all 3 delinquency columns with **100% concordance**.
-- Sentinel 96 occurrences: **5** across all 3 delinquency columns with **100% concordance**.
-- Total sentinel records: **269** ($0.18\%$ of borrowers).
-- Default rate among sentinel borrowers: **54.65%**!
-- Default rate among normal borrowers: **6.60%**!
+A false positive costs one unit in the challenge. A false negative costs 12. For example, missing two defaults and flagging three borrowers who repay costs 27 units. The analysis tries a range of probability thresholds, counts both types of error, and reports cost per 1,000 applicants so results are comparable across samples.
 
-Borrowers with sentinel codes are **8.28 times more likely to default**. Converting this domain nuance into a feature (`has_sentinel_late_code`) captures this massive signal, while masking the values prevents mathematical corruption in models like Logistic Regression.
+The prediction command reads a saved model and threshold. The executed notebook contains the model comparison, threshold curve, and subgroup results. The README has commands for running the demo, scoring a file, and testing the package.
 
----
-
-## 4. Verification and Delivery Guide Compliance
-- [x] Data ingested via `nyc311-data-factory` with manifest and quality report.
-- [x] All 150,000 records loaded to PostgreSQL `credit.borrowers`.
-- [x] Database view `credit.vw_borrowers_clean` created and verified.
-- [x] Package `credit-risk-ml` created and installed in editable mode.
-- [x] 8 comprehensive unit tests created and passing with 100% success.
-- [x] Precomputed `solution.ipynb` with sequential execution counts (1 to N) and embedded outputs.
-- [x] `report.md` structured according to all challenge criteria.
+[Cost calculation](src/credit_risk/cost.py) · [Executed notebook](solution.ipynb) · [Setup and commands](README.md)

@@ -1,16 +1,21 @@
-s# NYC 311 Data Factory — Stage 1
+# FTI Season 3
 
-This project starts the first challenge from the supplied delivery guide and
-Data Factory brief. It currently implements validated configuration, a
-retrying Socrata client, atomic and resumable raw-page downloads, and a
-page-at-a-time curation step with quarantine outputs. The raw source data is
-intentionally excluded from Git.
+This repository contains three data projects. Start with the stage that matches the question you want to answer.
 
-## Run
+| Stage | Question | Where to start |
+| --- | --- | --- |
+| 1 · NYC 311 | Where and when do New Yorkers report heating problems? | [Factory walkthrough](PROJECT_EXPLAINED.md) · [Analysis notebook](solution.ipynb) |
+| 2 · Database performance | How quickly can PostgreSQL answer five questions about Olist orders? | [Setup and benchmark](part2/stage-2-database-performance/README.md) · [Results](part2/stage-2-database-performance/report.md) |
+| 3 · Credit risk | What decision threshold balances missed defaults against rejected borrowers? | [Training and prediction](part3/stage-3-machine-learning/README.md) · [Model report](part3/stage-3-machine-learning/report.md) |
+
+## Run the NYC 311 factory
+
+The factory downloads one page at a time, records its progress, and validates each service request. It writes accepted records to CSV and records rejected rows with their reasons. The analysis joins accepted requests to ZIP-code population estimates.
+
+Run these commands from the repository root. After creating the environment, activate it with `source .venv/bin/activate` on macOS or Linux, or `.\.venv\Scripts\Activate.ps1` in PowerShell.
 
 ```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m pip install -e .
 nyc311-factory --count-only
@@ -20,8 +25,7 @@ nyc311-factory --offline         # full local replay; requires a complete checkp
 python -m unittest discover -s tests -v
 ```
 
-On macOS/Linux, activate the environment with `source .venv/bin/activate`.
-Run commands from the project root. `--count-only` checks the configured slice
+`--count-only` checks the configured slice
 without downloading the records. A download can be safely rerun with the same
 configuration; its checkpoint and page files are stored under `data/raw/311`.
 After a successful download, `--curate-only` validates those pages and writes
@@ -50,7 +54,7 @@ $env:NYC311_API_KEY_SECRET = "<key secret>"
 
 Do not commit credential files; `credential.md` is listed in `.gitignore`.
 
-## Next implementation steps
+## Recorded run and follow-up checks
 
 1. Done for the initial reference: `data/reference/zip_population.csv` uses
    2024 ACS ZCTA estimates and the documented land-overlap borough rule.

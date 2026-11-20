@@ -1,5 +1,7 @@
 # Stage 2 — Database Performance
 
+The benchmark compares five dashboard queries before and after changing their indexes and SQL. Start with the [results table](report.md) to see the measured effect. To trace one measurement, follow the numbered query in [sql/queries](sql/queries), then open its execution plan in [solution.ipynb](solution.ipynb).
+
 Run these setup and build commands from the **repository root**, using Python 3.11+:
 
 ```powershell

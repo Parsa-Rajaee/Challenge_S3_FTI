@@ -27,9 +27,7 @@ class RawDownloader:
         if offline:
             # Offline replay must have a complete checkpoint; it never fetches data or schema.
             if checkpoint is None or not checkpoint["complete"]:
-                raise CheckpointError(
-                    "Offline replay requires a complete raw download checkpoint"
-                )
+                raise CheckpointError("Offline replay requires a complete raw download checkpoint")
             self._enforce_target(checkpoint["raw_count"])
             return checkpoint
 
@@ -40,45 +38,26 @@ class RawDownloader:
             self._enforce_target(checkpoint["raw_count"])
             return checkpoint
 
-        # Resume from the saved offset; a fresh run starts at 0.
-        offset = checkpoint["next_offset"] if checkpoint else 0
-        raw_count = checkpoint["raw_count"] if checkpoint else 0
-        while True:
-            rows = self.client.fetch_page(offset)
-            # An empty page means there are no more rows to download.
-            if not rows:
-                break
-            # Write the page first, then the checkpoint, so a crash never points
-            # to a page that was not saved.
-            self._write_page(offset, rows)
-            raw_count += len(rows)
-            offset += len(rows)
-            checkpoint = {
-                "signature": self.settings.source_signature,
-                "next_offset": offset,
-                "raw_count": raw_count,
-                # A short page means the API has no more rows.
-                "complete": len(rows) < self.settings.page_size,
-            }
-            self._write_checkpoint(checkpoint)
-            if checkpoint["complete"]:
-                break
-
-        # No checkpoint and no rows: record an empty but complete download.
         if checkpoint is None:
             checkpoint = {
                 "signature": self.settings.source_signature,
                 "next_offset": 0,
                 "raw_count": 0,
-                "complete": True,
+                "complete": False,
             }
-            self._write_checkpoint(checkpoint)
-        # The loop ended because the API had no more rows, so mark the download complete.
-        elif not checkpoint["complete"]:
-            checkpoint["complete"] = True
+
+        while not checkpoint["complete"]:
+            offset = checkpoint["next_offset"]
+            rows = self.client.fetch_page(offset)
+            if rows:
+                # Commit the page before advancing the checkpoint so a retry is safe.
+                self._write_page(offset, rows)
+                checkpoint["next_offset"] += len(rows)
+                checkpoint["raw_count"] += len(rows)
+            checkpoint["complete"] = not rows or len(rows) < self.settings.page_size
             self._write_checkpoint(checkpoint)
 
-        self._enforce_target(raw_count)
+        self._enforce_target(checkpoint["raw_count"])
         return checkpoint
 
     def _enforce_target(self, raw_count: int) -> None:
@@ -112,17 +91,9 @@ class RawDownloader:
         if next_offset < 0 or raw_count != next_offset:
             raise CheckpointError("Checkpoint offsets and raw row count are inconsistent")
         # Every page the checkpoint claims to have written must exist on disk.
-        if next_offset:
-            page_size = self.settings.page_size
-            full_pages = next_offset // page_size
-            for page_number in range(full_pages):
-                page_offset = page_number * page_size
-                if not self._page_path(page_offset).is_file():
-                    raise CheckpointError(f"Checkpoint page is missing: {page_offset}")
-            # The last, partly filled page is named by its starting offset.
-            remainder = next_offset % page_size
-            if remainder and not self._page_path(next_offset - remainder).is_file():
-                raise CheckpointError(f"Checkpoint page is missing: {next_offset - remainder}")
+        for page_offset in range(0, next_offset, self.settings.page_size):
+            if not self._page_path(page_offset).is_file():
+                raise CheckpointError(f"Checkpoint page is missing: {page_offset}")
         return {
             "signature": checkpoint["signature"],
             "next_offset": next_offset,
