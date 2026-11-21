@@ -18,6 +18,11 @@ FEATURES = (
     "prior_day_deliveries",
     "prior_day_replies",
     "prior_day_negatives",
+    "snapshot_available",
+    "seller_count",
+    "product_count",
+    "authorized_payment_value",
+    "interstate_shipping",
 )
 CATEGORICAL=('customer_state','customer_zip_region')
 BANNED={'review_score','review_creation_date','order_status','order_delivered_customer_date','order_delivered_carrier_date','review_answer_timestamp','review_comment_message'}

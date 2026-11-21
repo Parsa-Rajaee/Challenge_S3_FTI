@@ -43,6 +43,7 @@ jobs:
           curl --fail --location --retry 3 https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce --output "$RUNNER_TEMP/olist.zip"
           unzip -q "$RUNNER_TEMP/olist.zip" -d "$RUNNER_TEMP/olist"
           fti-capstone build --raw-dir "$RUNNER_TEMP/olist"
+          python part4/verify_replay.py "$RUNNER_TEMP/olist" part4/artifacts
           cat part4/artifacts/measured_results.md
           cat part4/artifacts/operations_summary.md
           jupyter nbconvert --to notebook --execute --inplace part4/*.ipynb

@@ -86,7 +86,11 @@ def predict(input_path,model_path,output):
     frame['risk_score']=saved['model'].predict_proba(frame[list(FEATURES)])[:,1]
     frame['follow_up']=select_top(frame.risk_score.to_numpy(),.10)
     frame.sort_values(['risk_score','order_id'],ascending=[False,True])[['order_id','approved_at','risk_score','follow_up']].to_csv(output,index=False)
-def build_snapshot(engine,offline):
+def build_snapshot(engine,offline,snapshots=None):
+    from .snapshots import load_snapshots
+    with engine.begin() as connection:
+        connection.execute(text('CREATE SCHEMA IF NOT EXISTS capstone'))
+    load_snapshots(engine, snapshots)
     years=pd.read_sql_query(text('SELECT DISTINCT EXTRACT(YEAR FROM order_approved_at)::int AS approval_year FROM olist.orders WHERE order_approved_at IS NOT NULL'),engine).approval_year.tolist()
     if not years: raise ValueError('No approved Olist orders')
     holidays=acquire_holidays(years,ROOT/'data'/'external',offline)
@@ -162,13 +166,14 @@ def run_training(engine,out):
     operation.sort_values(['risk_score','order_id'],ascending=[False,True])[['order_id','approved_at','risk_score','follow_up']].to_csv(out/'follow_up_ranked.csv',index=False)
     import joblib
     joblib.dump({'model':model,'features':FEATURES,'cutoff':cutoff},out/'model.joblib')
-    summary={'cutoff_month':cutoff,'training_rows':len(train),'evaluation_rows':len(test),'unreviewed_excluded_from_evaluation':int(all_orders.negative.isna().sum()),'model_selected':winner,'validation_month':str(last),'validation_recall_10pct':validation,'metrics':metrics,'leakage_recall_delta_at_10pct':metrics['intentionally_leaky_DO_NOT_DEPLOY']['0.1']['recall']-metrics[winner]['0.1']['recall'],'monthly':monthly,'last_month':monthly[max(monthly)],'drift':feature_drift(train,test),'operation_orders_ranked':len(operation)}
+    summary={'snapshot_coverage':float(features.snapshot_available.mean()),'cutoff_month':cutoff,'training_rows':len(train),'evaluation_rows':len(test),'unreviewed_excluded_from_evaluation':int(all_orders.negative.isna().sum()),'model_selected':winner,'validation_month':str(last),'validation_recall_10pct':validation,'metrics':metrics,'leakage_recall_delta_at_10pct':metrics['intentionally_leaky_DO_NOT_DEPLOY']['0.1']['recall']-metrics[winner]['0.1']['recall'],'monthly':monthly,'last_month':monthly[max(monthly)],'drift':feature_drift(train,test),'operation_orders_ranked':len(operation)}
     (out/'evaluation.json').write_text(json.dumps(summary,indent=2,default=str),encoding='utf-8')
     return summary
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     b=sub.add_parser('build');b.add_argument('--raw-dir',type=Path,default=STAGE2/'data'/'raw');b.add_argument('--skip-load',action='store_true');b.add_argument('--offline',action='store_true');b.add_argument('--output',type=Path,default=ROOT/'artifacts')
+    b.add_argument('--checkout-snapshots', type=Path, help='Optional genuinely timestamped seller, product, payment and geography snapshots')
     p=sub.add_parser('predict');p.add_argument('--input',type=Path,required=True);p.add_argument('--artifact',type=Path,default=ROOT/'artifacts'/'model.joblib');p.add_argument('--output',type=Path,default=ROOT/'artifacts'/'unseen_ranked.csv')
     args=parser.parse_args(argv)
     if args.command=='predict':
@@ -184,7 +189,7 @@ def main(argv=None):
             t=time.perf_counter();apply_migrations(engine,include_indexes=True,include_retirements=True);timings['migrations_seconds']=time.perf_counter()-t
             t=time.perf_counter();manifest=ingest_orders(engine,args.raw_dir,args.output);timings['load_seconds']=time.perf_counter()-t
             (args.output/'ingestion_manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
-        t=time.perf_counter();plan=build_snapshot(engine,args.offline);timings['feature_seconds']=time.perf_counter()-t
+        t=time.perf_counter();plan=build_snapshot(engine,args.offline,args.checkout_snapshots);timings['feature_seconds']=time.perf_counter()-t
         (args.output/'feature_query_plan.json').write_text(json.dumps(plan,indent=2),encoding='utf-8')
         t=time.perf_counter();summary=run_training(engine,args.output);timings['training_seconds']=time.perf_counter()-t
         with engine.connect() as con:

@@ -38,3 +38,15 @@ With two further days, investigate intervention effectiveness on a randomized gr
 ## AI usage
 
 An AI assistant drafted the implementation, tests and analysis text. The recorded run produces the measured results. No student-authored revisions or private evaluator results are claimed.
+
+## Timestamped commercial inputs
+
+The optional checkout snapshot contract adds seller and product counts, payment authorization value and cross-state shipping. Its source must capture those facts at the stated time. The public benchmark has zero timestamped coverage, so those inputs cannot support a retrospective performance claim. Coverage is recorded in evaluation.json.
+
+## First verified public benchmark
+
+In the approval-time model run with the May 2018 cutoff, contacting 5%, 10% and 20% found 6.3%, 12.9% and 23.9% of known negative reviews. At 10%, approval delay alone found 10.22%. Future information inflated recall by 18.97 percentage points. The holiday signal reduced recall by 0.07 points. The last month had only one approved order and one negative review. A 10% hard cap allowed no call, so the latest-month recall was zero by construction. This result cannot establish that customers or the model changed.
+
+The full feature query took 148 ms and the build 73.6 seconds on the hosted runner. These measurements describe the linked run before optional timestamped commercial inputs. Later runs regenerate both numbers, the confusion counts and the executed notebooks.
+
+[Benchmark run and executed notebooks](https://github.com/Parsa-Rajaee/Challenge_S3_FTI/actions/runs/44893656824)

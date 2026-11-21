@@ -53,7 +53,16 @@ def test_raw_to_ranked(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "acquire_holidays", lambda *args: [])
     monkeypatch.setattr("capstone.raw_orders.acquire_holidays", lambda *args: [])
     out = tmp_path / "out"
-    runner.main(["build","--raw-dir",str(raw),"--output",str(out)])
+    capture = tmp_path / "captures.csv"
+    capture.write_text("order_id,observed_at,seller_count,product_count,authorized_payment_value,interstate_shipping\n"
+                       + f"{uid(10)},2017-01-01 08:30:00,1,2,50,0\n"
+                       + f"{uid(10)},2017-01-01 10:00:00,9,9,999,1\n")
+    runner.main(["build","--raw-dir",str(raw),"--output",str(out),"--checkout-snapshots",str(capture)])
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT snapshot_available, product_count FROM capstone.features WHERE order_id=:id"),
+                                 {"id":uid(10)}).one()
+        assert tuple(row) == (1,2)
+        assert connection.execute(text("SELECT sum(snapshot_available) FROM capstone.features")).scalar() == 1
     unseen = pd.read_csv(raw / "olist_orders_dataset.csv",dtype=str).iloc[-20:].copy()
     unseen["order_id"] = [uid(1000+i) for i in range(20)]
     unseen["order_status"] = "approved"
