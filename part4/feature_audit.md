@@ -19,7 +19,7 @@
 | snapshot_available | Checkout snapshot observed at or before approval | A timestamped capture distinguishes observed zeros from missing history. |
 | seller_count | Checkout snapshot observed at or before approval | Distinct sellers in the captured basket test coordination burden. |
 | product_count | Checkout snapshot observed at or before approval | Distinct products in the captured basket test packing complexity. |
-| authorized_payment_value | Checkout snapshot observed at or before approval | Captured authorized payment total tests order-value effects. |
+| observed_payment_value | Checkout snapshot observed at or before approval | Captured payment total tests order-value effects. |
 | interstate_shipping | Checkout snapshot observed at or before approval | Captured seller and customer states test cross-state shipping risk. |
 
 The leaky comparison deliberately uses delivery duration, carrier handoff duration and final delivery status. Each is only known after approval. No current-order review enters production. Distinct item sellers, catalog measurements and payment totals have no first-seen timestamps in the public export. They are excluded from the retrospective model. An approval-time capture of the basket, catalog and payment authorizations would permit a broader model.

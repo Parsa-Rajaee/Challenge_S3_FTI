@@ -16,14 +16,14 @@ SELECT o.order_id, o.order_approved_at AS approved_at,
     (snap.observed_at IS NOT NULL)::int AS snapshot_available,
     coalesce(snap.seller_count,0) AS seller_count,
     coalesce(snap.product_count,0) AS product_count,
-    coalesce(snap.authorized_payment_value,0) AS authorized_payment_value,
+    coalesce(snap.observed_payment_value,0) AS observed_payment_value,
     coalesce(snap.interstate_shipping,0) AS interstate_shipping
 FROM {orders} o
 LEFT JOIN olist.customers c USING (customer_id)
 LEFT JOIN capstone.holidays h ON h.holiday_date = o.order_approved_at::date
 LEFT JOIN capstone.shipping_days d ON d.day = o.order_approved_at::date - 1
 LEFT JOIN LATERAL (
-    SELECT observed_at, seller_count, product_count, authorized_payment_value, interstate_shipping
+    SELECT observed_at, seller_count, product_count, observed_payment_value, interstate_shipping
     FROM capstone.checkout_snapshots saved
     WHERE saved.order_id = o.order_id AND saved.observed_at <= o.order_approved_at
     ORDER BY saved.observed_at DESC LIMIT 1

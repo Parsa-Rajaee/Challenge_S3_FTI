@@ -33,4 +33,14 @@ def write_reports(output):
                        f"{latest['n']} reviewed, {latest.get('positives', 0)} negative.",
                   f"Known-outcome recall: {latest['recall']}.",
                   f"Missing approvals excluded: {data['approved_timestamp_missing_excluded']}."])
+    numeric_drift = {}
+    for feature, change in data["drift"].items():
+        shift = change.get("standardized_mean_shift")
+        if shift is not None:
+            numeric_drift[feature] = shift
+    for feature in sorted(numeric_drift, key=numeric_drift.get, reverse=True)[:3]:
+        lines.append(f"Training-to-holdout shift in {feature}: {numeric_drift[feature]:.2f} training standard deviations.")
+    lines.append(f"Timestamped commercial snapshot coverage: {data['snapshot_coverage']:.1%}.")
+    if latest["eligible_orders"] < 10:
+        lines.append("The last month had fewer than ten orders. The 10% limit permitted zero calls.")
     (output / "measured_results.md").write_text("\n".join(lines)+"\n", encoding="utf-8")

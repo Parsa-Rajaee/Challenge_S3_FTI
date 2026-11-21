@@ -41,7 +41,7 @@ An AI assistant drafted the implementation, tests and analysis text. The recorde
 
 ## Timestamped commercial inputs
 
-The optional checkout snapshot contract adds seller and product counts, payment authorization value and cross-state shipping. Its source must capture those facts at the stated time. The public benchmark has zero timestamped coverage, so those inputs cannot support a retrospective performance claim. Coverage is recorded in evaluation.json.
+The optional checkout snapshot contract adds seller and product counts, payment value and cross-state shipping. Its source must capture those facts at the stated time. The public benchmark has zero timestamped coverage, so those inputs cannot support a retrospective performance claim. Coverage is recorded in evaluation.json.
 
 ## First verified public benchmark
 

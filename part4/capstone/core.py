@@ -21,7 +21,7 @@ FEATURES = (
     "snapshot_available",
     "seller_count",
     "product_count",
-    "authorized_payment_value",
+    "observed_payment_value",
     "interstate_shipping",
 )
 CATEGORICAL=('customer_state','customer_zip_region')

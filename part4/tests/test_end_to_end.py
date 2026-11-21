@@ -54,7 +54,7 @@ def test_raw_to_ranked(tmp_path, monkeypatch):
     monkeypatch.setattr("capstone.raw_orders.acquire_holidays", lambda *args: [])
     out = tmp_path / "out"
     capture = tmp_path / "captures.csv"
-    capture.write_text("order_id,observed_at,seller_count,product_count,authorized_payment_value,interstate_shipping\n"
+    capture.write_text("order_id,observed_at,seller_count,product_count,observed_payment_value,interstate_shipping\n"
                        + f"{uid(10)},2017-01-01 08:30:00,1,2,50,0\n"
                        + f"{uid(10)},2017-01-01 10:00:00,9,9,999,1\n")
     runner.main(["build","--raw-dir",str(raw),"--output",str(out),"--checkout-snapshots",str(capture)])
@@ -79,3 +79,14 @@ def test_raw_to_ranked(tmp_path, monkeypatch):
     runner.main(args)
     pd.testing.assert_frame_equal(result, pd.read_csv(out/"new.csv"))
     assert json.loads((out/"evaluation.json").read_text())["training_rows"] > 0
+
+def test_calendar_quarantines_wrong_country(tmp_path):
+    from nyc311_factory.holidays import acquire_holidays
+    rows = [
+        {"date":"2018-01-01","name":"New Year","countryCode":"BR","global":True},
+        {"date":"2018-02-01","name":"Wrong source","countryCode":"US"},
+    ]
+    (tmp_path / "holidays_br_2018.json").write_text(json.dumps(rows))
+    assert acquire_holidays([2018], tmp_path, offline=True) == [("2018-01-01","New Year","Nager.Date")]
+    manifest = json.loads((tmp_path / "manifest_2018.json").read_text())
+    assert manifest["accepted_records"] == manifest["quarantined_records"] == 1
