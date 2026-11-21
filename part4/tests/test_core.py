@@ -10,8 +10,8 @@ def test_leakage_rejected(bad):
     with pytest.raises(ValueError):audit_features((*FEATURES,bad))
 @pytest.mark.parametrize('capacity,count',[(.05,5),(.10,10),(.20,20)])
 def test_quota(capacity,count):assert select_top(np.arange(100),capacity).sum()==count
-def test_ceil():assert select_top(np.arange(21),.05).sum()==2
-def test_tie():assert select_top([1,1,1]).tolist()==[True,False,False]
+def test_hard_capacity():assert select_top(np.arange(21),.05).sum()==1
+def test_tie():assert select_top([1,1,1],.5).tolist()==[True,False,False]
 @pytest.mark.parametrize('capacity',[0,1.1,-.2])
 def test_invalid_capacity(capacity):
     with pytest.raises(ValueError):select_top([.2],capacity)
@@ -33,15 +33,15 @@ def test_duplicate(tmp_path):
     file=tmp_path/'orders.csv';frame.to_csv(file,index=False)
     with pytest.raises(ValueError,match='unique'):validate_new_orders(file)
 def test_numeric(tmp_path):
-    frame=pd.DataFrame([{**dict.fromkeys(FEATURES,1),'order_id':'a','approved_at':'2018-01-01','item_count':'garbage'}])
+    frame=pd.DataFrame([{**dict.fromkeys(FEATURES,1),'order_id':'a','approved_at':'2018-01-01','approval_hour':'garbage'}])
     file=tmp_path/'orders.csv';frame.to_csv(file,index=False)
     with pytest.raises(ValueError):validate_new_orders(file)
 def test_drift():
     frame=pd.DataFrame({c:(['SP','RJ'] if c in ('customer_state','customer_zip_region') else [1,2]) for c in FEATURES})
-    assert feature_drift(frame,frame)['item_count']['standardized_mean_shift']==0
+    assert feature_drift(frame,frame)['approval_hour']['standardized_mean_shift']==0
 def test_synthetic_model_path():
     df=pd.DataFrame([{c:('SP' if i%2 else 'RJ') if c in ('customer_state','customer_zip_region') else i%11 for c in FEATURES} for i in range(64)])
     labels=np.array([int(i%4==0) for i in range(64)])
     for model in models().values():
         model.fit(df,labels);pred=model.predict_proba(df)[:,1]
-        assert np.isfinite(pred).all() and select_top(pred).sum()==7
+        assert np.isfinite(pred).all() and select_top(pred).sum()==6
