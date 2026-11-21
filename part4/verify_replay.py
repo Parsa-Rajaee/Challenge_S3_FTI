@@ -10,6 +10,10 @@ from capstone.runner import main
 
 def verify(raw_dir, artifacts):
     report = json.loads((artifacts / "evaluation.json").read_text())
+    plan = json.loads((artifacts / "feature_query_plan.json").read_text())[0]
+    timings = json.loads((artifacts / "timings.json").read_text())
+    assert plan["Execution Time"] < 500, f"Feature query took {plan['Execution Time']} ms"
+    assert timings["total_seconds"] < 45 * 60, f"Build took {timings['total_seconds']} seconds"
     orders = pd.read_csv(raw_dir / "olist_orders_dataset.csv", dtype=str)
     approved = pd.to_datetime(orders["order_approved_at"])
     eligible = orders.loc[approved >= pd.Timestamp(report["cutoff_month"])].copy()

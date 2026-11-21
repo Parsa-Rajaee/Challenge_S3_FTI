@@ -22,10 +22,11 @@ FROM {orders} o
 LEFT JOIN olist.customers c USING (customer_id)
 LEFT JOIN capstone.holidays h ON h.holiday_date = o.order_approved_at::date
 LEFT JOIN capstone.shipping_days d ON d.day = o.order_approved_at::date - 1
-LEFT JOIN LATERAL (
-    SELECT observed_at, seller_count, product_count, observed_payment_value, interstate_shipping
-    FROM capstone.checkout_snapshots saved
-    WHERE saved.order_id = o.order_id AND saved.observed_at <= o.order_approved_at
-    ORDER BY saved.observed_at DESC LIMIT 1
-) snap ON TRUE
+LEFT JOIN (
+    SELECT checkout_snapshots.*,
+           lead(observed_at) OVER (PARTITION BY order_id ORDER BY observed_at) AS next_observation
+    FROM capstone.checkout_snapshots
+) snap ON snap.order_id = o.order_id
+      AND snap.observed_at <= o.order_approved_at
+      AND (snap.next_observation IS NULL OR o.order_approved_at < snap.next_observation)
 WHERE o.order_approved_at IS NOT NULL
