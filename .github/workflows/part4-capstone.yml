@@ -43,6 +43,8 @@ jobs:
           curl --fail --location --retry 3 https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce --output "$RUNNER_TEMP/olist.zip"
           unzip -q "$RUNNER_TEMP/olist.zip" -d "$RUNNER_TEMP/olist"
           fti-capstone build --raw-dir "$RUNNER_TEMP/olist"
+          cat part4/artifacts/measured_results.md
+          cat part4/artifacts/operations_summary.md
           jupyter nbconvert --to notebook --execute --inplace part4/*.ipynb
       - uses: actions/upload-artifact@v4
         with:
@@ -51,4 +53,6 @@ jobs:
             part4/*.ipynb
             part4/artifacts/*.md
             part4/artifacts/*.json
+            part4/artifacts/follow_up_ranked.csv
+            part4/artifacts/model.joblib
           if-no-files-found: error

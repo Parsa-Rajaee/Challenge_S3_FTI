@@ -1,5 +1,9 @@
 """Build, evaluate, and score Olist orders. Outputs are evidence, not invented metrics."""
-import argparse,json,os,sys,time
+import argparse
+import json
+import os
+import sys
+import time
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -16,11 +20,30 @@ from .raw_orders import raw_features, feature_query, ensure_calendar
 from .reporting import write_reports
 ROOT=Path(__file__).resolve().parents[1]
 STAGE2=ROOT.parent/'part2'/'stage-2-database-performance'
-def preprocess():
-    numerical=[c for c in FEATURES if c not in CATEGORICAL]
-    return ColumnTransformer([('numeric',Pipeline([('impute',SimpleImputer(strategy='median')),('scale',StandardScaler())]),numerical),('categories',Pipeline([('impute',SimpleImputer(strategy='most_frequent')),('encode',OneHotEncoder(handle_unknown='ignore'))]),list(CATEGORICAL))])
-def models():
-    return {'logistic':Pipeline([('preprocess',preprocess()),('model',LogisticRegression(max_iter=800,class_weight='balanced'))]),'random_forest':Pipeline([('preprocess',preprocess()),('model',RandomForestClassifier(n_estimators=160,min_samples_leaf=8,class_weight='balanced_subsample',random_state=42,n_jobs=-1))])}
+def preprocess(columns=FEATURES):
+    numbers = [column for column in columns if column not in CATEGORICAL]
+    numeric_steps = Pipeline([
+        ("impute", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler()),
+    ])
+    category_steps = Pipeline([
+        ("impute", SimpleImputer(strategy="most_frequent")),
+        ("encode", OneHotEncoder(handle_unknown="ignore")),
+    ])
+    return ColumnTransformer([
+        ("numeric", numeric_steps, numbers),
+        ("categories", category_steps, list(CATEGORICAL)),
+    ])
+
+def models(columns=FEATURES):
+    logistic = LogisticRegression(max_iter=800, class_weight="balanced")
+    forest = RandomForestClassifier(n_estimators=160, min_samples_leaf=8,
+                                    class_weight="balanced_subsample", random_state=42, n_jobs=-1)
+    return {
+        "logistic": Pipeline([("preprocess", preprocess(columns)), ("model", logistic)]),
+        "random_forest": Pipeline([("preprocess", preprocess(columns)), ("model", forest)]),
+    }
+
 def feature_drift(train,test):
     results={}
     for key in FEATURES:
@@ -64,7 +87,7 @@ def predict(input_path,model_path,output):
     frame['follow_up']=select_top(frame.risk_score.to_numpy(),.10)
     frame.sort_values(['risk_score','order_id'],ascending=[False,True])[['order_id','approved_at','risk_score','follow_up']].to_csv(output,index=False)
 def build_snapshot(engine,offline):
-    years=pd.read_sql_query(text('SELECT DISTINCT EXTRACT(YEAR FROM order_approved_at)::int year FROM olist.orders WHERE order_approved_at IS NOT NULL'),engine).year.tolist()
+    years=pd.read_sql_query(text('SELECT DISTINCT EXTRACT(YEAR FROM order_approved_at)::int AS approval_year FROM olist.orders WHERE order_approved_at IS NOT NULL'),engine).approval_year.tolist()
     if not years: raise ValueError('No approved Olist orders')
     holidays=acquire_holidays(years,ROOT/'data'/'external',offline)
     with engine.begin() as con:
@@ -87,7 +110,8 @@ def run_training(engine,out):
         MAX(EXTRACT(EPOCH FROM (o.order_delivered_customer_date-o.order_approved_at))/86400.0)::float8 leaked_delivery_days,
         MAX((o.order_status='delivered')::int)::int leaked_delivered,
         MAX(EXTRACT(EPOCH FROM (o.order_delivered_carrier_date-o.order_approved_at))/86400.0)::float8 leaked_carrier_days,
-        MAX(r.review_answer_timestamp) AS label_available_at
+        CASE WHEN count(*) = count(r.review_answer_timestamp)
+             THEN MAX(r.review_answer_timestamp) END AS label_available_at
         FROM olist.orders o JOIN olist.order_reviews r ON r.order_id=o.order_id
         WHERE o.order_approved_at IS NOT NULL GROUP BY o.order_id
     """),engine)
@@ -111,13 +135,15 @@ def run_training(engine,out):
         metrics[name]={str(c):evaluate(test.negative,scores[name][1],c) for c in (.05,.10,.20)}
     baseline=test.approval_lag_hours.fillna(0).to_numpy()
     metrics['approval_delay_baseline']={str(c):evaluate(test.negative,baseline,c) for c in (.05,.10,.20)}
-    leaked=['leaked_delivery_days','leaked_delivered','leaked_carrier_days']
-    numeric=[c for c in [*FEATURES,*leaked] if c not in CATEGORICAL]
-    leaky=Pipeline([('preprocess',ColumnTransformer([('numeric',Pipeline([('impute',SimpleImputer(strategy='median')),('scale',StandardScaler())]),numeric),('category',OneHotEncoder(handle_unknown='ignore'),list(CATEGORICAL))])),('model',RandomForestClassifier(n_estimators=160,min_samples_leaf=8,random_state=42,n_jobs=-1))])
-    leaky.fit(train[[*FEATURES,*leaked]].fillna({c:'MISSING' for c in CATEGORICAL}),train.negative.astype(int))
-    leaked_score=leaky.predict_proba(test[[*FEATURES,*leaked]].fillna({c:'MISSING' for c in CATEGORICAL}))[:,1]
-    metrics['intentionally_leaky_DO_NOT_DEPLOY']={'0.1':evaluate(test.negative,leaked_score,.10)}
-    winner=max(validation,key=validation.get);model,score=scores[winner]
+    winner = max(validation, key=validation.get)
+    model, score = scores[winner]
+    # Keep the family, training rows and hyperparameters fixed in the leakage experiment.
+    leaked = ["leaked_delivery_days", "leaked_delivered", "leaked_carrier_days"]
+    comparison_columns = list(FEATURES) + leaked
+    comparison_model = models(comparison_columns)[winner]
+    comparison_model.fit(train[comparison_columns], train.negative.astype(int))
+    leaked_score = comparison_model.predict_proba(test[comparison_columns])[:, 1]
+    metrics["intentionally_leaky_DO_NOT_DEPLOY"] = {"0.1": evaluate(test.negative, leaked_score)}
     # Refit the selected family with the holiday flag held constant.
     without_holiday = models()[winner]
     train_inputs = train[list(FEATURES)].assign(is_public_holiday=0)

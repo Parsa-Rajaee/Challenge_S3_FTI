@@ -19,7 +19,7 @@ The decision happens when payment approval is recorded. A support agent needs a 
 
 ## Temporal leakage
 
-The availability table in feature_audit.md is independent of the model's Python list. The integration test passes a future delivery date through the raw prediction command and checks that every score stays identical. The deliberately leaky forest additionally uses elapsed time until carrier handoff, elapsed time until delivery, and final delivered status. Compare recall at the same quota in artifacts/measured_results.md. The selected model may differ in family from the leaky forest. Treat their difference as a model comparison, not an isolated causal effect.
+The availability table in feature_audit.md is independent of the model's Python list. The integration test passes a future delivery date through the raw prediction command and checks that every score stays identical. The deliberately leaky comparison model additionally uses elapsed time until carrier handoff, elapsed time until delivery, and final delivered status. Compare recall at the same quota in artifacts/measured_results.md. Both models use the same family and hyperparameters.
 
 ## What we rejected
 

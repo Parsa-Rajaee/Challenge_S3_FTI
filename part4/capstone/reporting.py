@@ -27,4 +27,10 @@ def write_reports(output):
              f"Holiday contribution to recall: {metrics[name]['0.1']['recall']-metrics['without_holiday']['0.1']['recall']:+.2%}.",
              f"Full feature SELECT: {plan['Execution Time']:.1f} ms. Build: {timings['total_seconds']:.1f} seconds.",
              "", "See evaluation.json for the confusion counts, each month's sample size and drift by feature."]
+    latest_month = max(data["monthly"])
+    latest = data["monthly"][latest_month]
+    lines.extend(["", f"Last month: {latest_month}, {latest['eligible_orders']} eligible orders, "
+                       f"{latest['n']} reviewed, {latest.get('positives', 0)} negative.",
+                  f"Known-outcome recall: {latest['recall']}.",
+                  f"Missing approvals excluded: {data['approved_timestamp_missing_excluded']}."])
     (output / "measured_results.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
