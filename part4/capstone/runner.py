@@ -2,9 +2,9 @@
 import argparse
 import json
 import os
-import sys
 import time
 from pathlib import Path
+import joblib
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine,text
@@ -14,10 +14,11 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder,StandardScaler
-from .core import FEATURES,CATEGORICAL,audit_features,evaluate,select_top,temporal_split
+from .core import FEATURES, CATEGORICAL, audit_features, evaluate, rank_orders, temporal_split
 from .external import acquire_holidays
 from .raw_orders import raw_features, feature_query, ensure_calendar
 from .reporting import write_reports
+from .snapshots import load_snapshots
 ROOT=Path(__file__).resolve().parents[1]
 STAGE2=ROOT.parent/'part2'/'stage-2-database-performance'
 def preprocess(columns=FEATURES):
@@ -55,7 +56,7 @@ def feature_drift(train,test):
             results[key]={'standardized_mean_shift':float(abs(b.mean()-a.mean())/a.std()) if a.std()>0 else None}
     return results
 def validate_new_orders(path):
-    frame=pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={name: str for name in ("order_id", *CATEGORICAL)})
     expected={'order_id','approved_at',*FEATURES};actual=set(frame.columns)
     if expected!=actual: raise ValueError(f'Input schema mismatch; missing={sorted(expected-actual)} unexpected={sorted(actual-expected)}')
     if frame.order_id.isna().any() or frame.order_id.duplicated().any(): raise ValueError('order_id must be unique and non-null')
@@ -64,8 +65,7 @@ def validate_new_orders(path):
     for key in FEATURES:
         if key not in CATEGORICAL: frame[key]=pd.to_numeric(frame[key],errors='raise')
     return frame
-def predict(input_path,model_path,output):
-    import joblib
+def predict(input_path, model_path, output, offline=False):
     saved=joblib.load(model_path) # Only load trusted artifacts.
     audit_features(saved['features'])
     if tuple(saved['features'])!=FEATURES: raise ValueError('Model feature schema differs from audited feature contract')
@@ -75,27 +75,30 @@ def predict(input_path,model_path,output):
             raise ValueError('Raw orders require DATABASE_URL for the shared SQL feature query')
         engine = create_engine(os.environ['DATABASE_URL'])
         try:
-            frame = raw_features(input_path, engine)
+            frame = raw_features(input_path, engine, offline)
         finally:
             engine.dispose()
     else:
         frame = validate_new_orders(input_path)
-    if frame.empty:
-        pd.DataFrame(columns=['order_id','approved_at','risk_score','follow_up']).to_csv(output,index=False)
-        return
-    frame['risk_score']=saved['model'].predict_proba(frame[list(FEATURES)])[:,1]
-    frame['follow_up']=select_top(frame.risk_score.to_numpy(),.10)
-    frame.sort_values(['risk_score','order_id'],ascending=[False,True])[['order_id','approved_at','risk_score','follow_up']].to_csv(output,index=False)
-def build_snapshot(engine,offline,snapshots=None):
-    from .snapshots import load_snapshots
+    scores = np.array([]) if frame.empty else saved["model"].predict_proba(frame[list(FEATURES)])[:, 1]
+    rank_orders(frame, scores).to_csv(output, index=False)
+
+
+def refresh_reference(engine, snapshots=None):
+    """Refresh live scoring inputs atomically."""
     with engine.begin() as connection:
-        connection.execute(text('CREATE SCHEMA IF NOT EXISTS capstone'))
-    load_snapshots(engine, snapshots)
+        connection.execute(text("REFRESH MATERIALIZED VIEW capstone.shipping_days"))
+        if snapshots is not None:
+            load_snapshots(connection, snapshots)
+
+
+def build_snapshot(engine, offline, snapshots=None, *, preserve_snapshots=False):
     years=pd.read_sql_query(text('SELECT DISTINCT EXTRACT(YEAR FROM order_approved_at)::int AS approval_year FROM olist.orders WHERE order_approved_at IS NOT NULL'),engine).approval_year.tolist()
     if not years: raise ValueError('No approved Olist orders')
     holidays=acquire_holidays(years,ROOT/'data'/'external',offline)
     with engine.begin() as con:
         con.execute(text('CREATE SCHEMA IF NOT EXISTS capstone'))
+        load_snapshots(con, snapshots, preserve_existing=preserve_snapshots)
         con.execute(text('CREATE TABLE IF NOT EXISTS capstone.holidays(holiday_date date PRIMARY KEY,holiday_name text NOT NULL,source text NOT NULL)'))
         con.execute(text('TRUNCATE capstone.holidays'))
         for date,name,source in holidays:
@@ -105,6 +108,38 @@ def build_snapshot(engine,offline,snapshots=None):
         con.exec_driver_sql(ddl.replace('{feature_query}', query))
     with engine.connect() as con:
         return con.exec_driver_sql("EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) SELECT * FROM capstone.feature_rows").scalar()
+
+
+def validate_models(development):
+    """Evaluate recent development months in separate contact batches."""
+    periods = development.approved_at.dt.to_period("M")
+    folds = {}
+    for month in sorted(periods.unique())[-3:]:
+        fit = development.loc[
+            (periods < month) & (development.label_available_at < month.start_time)
+        ]
+        valid = development.loc[periods == month].copy()
+        mature = valid.label_available_at < (month + 1).start_time
+        valid["negative"] = valid.negative.where(mature)
+        if fit.negative.nunique() < 2 or valid.negative.eq(1).sum() == 0:
+            continue
+        results = {}
+        for name, model in models().items():
+            model.fit(fit[list(FEATURES)], fit.negative.astype(int))
+            scores = model.predict_proba(valid[list(FEATURES)])[:, 1]
+            results[name] = evaluate(valid.negative, scores)
+        folds[str(month)] = {"fit_rows": len(fit), "models": results}
+
+    if not folds:
+        raise ValueError("Insufficient chronological development set")
+    validation = {}
+    for name in next(iter(folds.values()))["models"]:
+        results = [fold["models"][name] for fold in folds.values()]
+        true_positives = sum(result["confusion_matrix_tn_fp_fn_tp"][-1] for result in results)
+        validation[name] = true_positives / sum(result["positives"] for result in results)
+    return validation, folds
+
+
 def run_training(engine,out):
     audit_features()
     cols=','.join(['order_id','approved_at',*FEATURES])
@@ -123,23 +158,16 @@ def run_training(engine,out):
     development, test, cutoff = temporal_split(all_orders)
     train = development.loc[development.label_available_at < pd.Timestamp(cutoff)].copy()
     if train.negative.nunique()!=2 or test.negative.nunique()!=2: raise ValueError('Both partitions require both labels')
-    periods=development.approved_at.dt.to_period('M');last=periods.max()
-    fit = development.loc[(periods < last) & (development.label_available_at < last.start_time)]
-    valid = development.loc[periods == last].copy()
-    valid.loc[valid.label_available_at >= pd.Timestamp(cutoff), 'negative'] = np.nan
-    valid.loc[valid.label_available_at.isna(), 'negative'] = np.nan
-    if fit.empty or valid.empty or fit.negative.nunique()!=2 or valid.negative.nunique()!=2:
-        raise ValueError('Insufficient chronological development set')
-    scores={};metrics={};validation={}
+    validation, folds = validate_models(development)
+    winner = max(validation, key=validation.get)
+    scores = {}
+    metrics = {}
     for name,model in models().items():
-        model.fit(fit[list(FEATURES)],fit.negative.astype(int))
-        validation[name]=evaluate(valid.negative,model.predict_proba(valid[list(FEATURES)])[:,1])['recall']
         model.fit(train[list(FEATURES)],train.negative.astype(int))
         scores[name]=(model,model.predict_proba(test[list(FEATURES)])[:,1])
         metrics[name]={str(c):evaluate(test.negative,scores[name][1],c) for c in (.05,.10,.20)}
     baseline=test.approval_lag_hours.fillna(0).to_numpy()
     metrics['approval_delay_baseline']={str(c):evaluate(test.negative,baseline,c) for c in (.05,.10,.20)}
-    winner = max(validation, key=validation.get)
     model, score = scores[winner]
     # Keep the family, training rows and hyperparameters fixed in the leakage experiment.
     leaked = ["leaked_delivery_days", "leaked_delivered", "leaked_carrier_days"]
@@ -155,41 +183,70 @@ def run_training(engine,out):
     without_holiday.fit(train_inputs, train.negative.astype(int))
     holiday_control = without_holiday.predict_proba(test_inputs)[:, 1]
     metrics['without_holiday'] = {'0.1': evaluate(test.negative, holiday_control)}
-    monthly={}
-    for month,subset in test.groupby(test.approved_at.dt.to_period('M')):
-        positions=test.index.get_indexer(subset.index)
-        monthly[str(month)] = evaluate(subset.negative,score[positions]) if subset.negative.notna().any() else {'eligible_orders':len(subset),'n':0,'recall':None}
-    # Operational quota is applied to ALL eligible orders, not just labeled orders.
-    operation=features.loc[features.approved_at>=pd.Timestamp(f'{cutoff}-01')].copy()
-    operation['risk_score']=model.predict_proba(operation[list(FEATURES)])[:,1]
-    operation['follow_up']=select_top(operation.risk_score.to_numpy(),.10)
-    operation.sort_values(['risk_score','order_id'],ascending=[False,True])[['order_id','approved_at','risk_score','follow_up']].to_csv(out/'follow_up_ranked.csv',index=False)
-    import joblib
+    monthly = {}
+    for month, subset in test.groupby(test.approved_at.dt.to_period("M")):
+        positions = test.index.get_indexer(subset.index)
+        result = evaluate(subset.negative, score[positions])
+        result["approval_delay_recall"] = evaluate(subset.negative, baseline[positions])["recall"]
+        monthly[str(month)] = result
+    ranked = rank_orders(test, score)
+    ranked.to_csv(out / "follow_up_ranked.csv", index=False)
     joblib.dump({'model':model,'features':FEATURES,'cutoff':cutoff},out/'model.joblib')
-    summary={'snapshot_coverage':float(features.snapshot_available.mean()),'cutoff_month':cutoff,'training_rows':len(train),'evaluation_rows':len(test),'unreviewed_excluded_from_evaluation':int(all_orders.negative.isna().sum()),'model_selected':winner,'validation_month':str(last),'validation_recall_10pct':validation,'metrics':metrics,'leakage_recall_delta_at_10pct':metrics['intentionally_leaky_DO_NOT_DEPLOY']['0.1']['recall']-metrics[winner]['0.1']['recall'],'monthly':monthly,'last_month':monthly[max(monthly)],'drift':feature_drift(train,test),'operation_orders_ranked':len(operation)}
-    (out/'evaluation.json').write_text(json.dumps(summary,indent=2,default=str),encoding='utf-8')
-    return summary
+    return {
+        "snapshot_coverage": float(features.snapshot_available.mean()),
+        "cutoff_month": cutoff,
+        "training_rows": len(train),
+        "evaluation_rows": len(test),
+        "unreviewed_excluded_from_evaluation": int(test.negative.isna().sum()),
+        "model_selected": winner,
+        "validation_month": max(folds),
+        "validation_recall_10pct": validation,
+        "validation_folds": folds,
+        "metrics": metrics,
+        "leakage_recall_delta_at_10pct": (
+            metrics["intentionally_leaky_DO_NOT_DEPLOY"]["0.1"]["recall"]
+            - metrics[winner]["0.1"]["recall"]
+        ),
+        "monthly": monthly,
+        "last_month": monthly[max(monthly)],
+        "drift": feature_drift(train, test),
+        "operation_orders_ranked": len(ranked),
+    }
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     b=sub.add_parser('build');b.add_argument('--raw-dir',type=Path,default=STAGE2/'data'/'raw');b.add_argument('--skip-load',action='store_true');b.add_argument('--offline',action='store_true');b.add_argument('--output',type=Path,default=ROOT/'artifacts')
     b.add_argument('--checkout-snapshots', type=Path, help='Optional genuinely timestamped seller, product, payment and geography snapshots')
     p=sub.add_parser('predict');p.add_argument('--input',type=Path,required=True);p.add_argument('--artifact',type=Path,default=ROOT/'artifacts'/'model.joblib');p.add_argument('--output',type=Path,default=ROOT/'artifacts'/'unseen_ranked.csv')
+    p.add_argument("--offline", action="store_true", help="Use cached holiday calendars for raw orders")
+    refresh = sub.add_parser("refresh-reference", help="Update live scoring inputs without training")
+    refresh.add_argument("--checkout-snapshots", type=Path, help="Replace the stored snapshot history")
     args=parser.parse_args(argv)
     if args.command=='predict':
-        args.output.parent.mkdir(parents=True,exist_ok=True);predict(args.input,args.artifact,args.output);return 0
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        predict(args.input, args.artifact, args.output, args.offline)
+        return 0
     if not os.environ.get('DATABASE_URL'): parser.error('DATABASE_URL is required')
+    if args.command == "refresh-reference":
+        engine = create_engine(os.environ["DATABASE_URL"])
+        try:
+            refresh_reference(engine, args.checkout_snapshots)
+        finally:
+            engine.dispose()
+        print("Refreshed approval-time scoring inputs.")
+        return 0
     args.output.mkdir(parents=True,exist_ok=True)
     timings={};start=time.perf_counter();engine=create_engine(os.environ['DATABASE_URL'],pool_pre_ping=True)
     try:
         if not args.skip_load:
-            sys.path.insert(0,str(STAGE2/'src'))
             from database_performance.loader import apply_migrations
             from nyc311_factory.olist import ingest_orders
             t=time.perf_counter();apply_migrations(engine,include_indexes=True,include_retirements=True);timings['migrations_seconds']=time.perf_counter()-t
             t=time.perf_counter();manifest=ingest_orders(engine,args.raw_dir,args.output);timings['load_seconds']=time.perf_counter()-t
             (args.output/'ingestion_manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
-        t=time.perf_counter();plan=build_snapshot(engine,args.offline,args.checkout_snapshots);timings['feature_seconds']=time.perf_counter()-t
+        t = time.perf_counter()
+        plan = build_snapshot(engine, args.offline, args.checkout_snapshots, preserve_snapshots=args.skip_load)
+        timings["feature_seconds"] = time.perf_counter() - t
         (args.output/'feature_query_plan.json').write_text(json.dumps(plan,indent=2),encoding='utf-8')
         t=time.perf_counter();summary=run_training(engine,args.output);timings['training_seconds']=time.perf_counter()-t
         with engine.connect() as con:

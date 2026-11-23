@@ -25,13 +25,23 @@ def verify(raw_dir, artifacts):
         source = Path(temp) / "unseen.csv"
         ranking = Path(temp) / "ranked.csv"
         eligible.to_csv(source, index=False)
-        main(["predict", "--input", str(source), "--artifact", str(artifacts / "model.joblib"),
+        main(["predict", "--offline", "--input", str(source), "--artifact", str(artifacts / "model.joblib"),
               "--output", str(ranking)])
         actual = pd.read_csv(ranking)
     expected = pd.read_csv(artifacts / "follow_up_ranked.csv")
     assert actual.order_id.tolist() == expected.order_id.tolist()
-    np.testing.assert_allclose(actual.risk_score, expected.risk_score, atol=1e-12)
+    assert actual.approved_at.tolist() == expected.approved_at.tolist()
+    np.testing.assert_allclose(actual.risk_score, expected.risk_score, atol=1e-12, rtol=0)
     assert actual.follow_up.tolist() == expected.follow_up.tolist()
+    assert actual.follow_up.is_monotonic_decreasing
+    evidence = {
+        "orders_matched": len(actual),
+        "orders_flagged": int(actual.follow_up.sum()),
+        "max_absolute_score_difference": float((actual.risk_score - expected.risk_score).abs().max()),
+        "feature_query_budget_ms": 500,
+        "build_budget_seconds": 45 * 60,
+    }
+    (artifacts / "replay.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(f"Raw prediction replay matched all {len(actual)} public holdout orders.")
 
 if __name__ == "__main__":
