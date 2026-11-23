@@ -1,12 +1,13 @@
 # FTI Season 3
 
-This repository contains three data projects. Start with the stage that matches the question you want to answer.
+This repository follows four stages. Start with the question you want to answer.
 
 | Stage | Question | Where to start |
 | --- | --- | --- |
 | 1 · NYC 311 | Where and when do New Yorkers report heating problems? | [Factory walkthrough](PROJECT_EXPLAINED.md) · [Analysis notebook](solution.ipynb) |
 | 2 · Database performance | How quickly can PostgreSQL answer five questions about Olist orders? | [Setup and benchmark](part2/stage-2-database-performance/README.md) · [Results](part2/stage-2-database-performance/report.md) |
 | 3 · Credit risk | What decision threshold balances missed defaults against rejected borrowers? | [Training and prediction](part3/stage-3-machine-learning/README.md) · [Model report](part3/stage-3-machine-learning/report.md) |
+| 4 · Olist capstone | Which newly approved orders should support contact within its capacity? | [Setup and scoring](part4/README.md) · [Results and decisions](part4/report.md) |
 
 ## Run the NYC 311 factory
 

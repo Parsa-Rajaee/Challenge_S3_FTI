@@ -29,7 +29,7 @@ jobs:
           python-version: '3.12'
       - name: Install packages and create empty databases
         run: |
-          pip install -e . -e ./part2/stage-2-database-performance -e ./part4 pytest nbconvert ipykernel
+          pip install -r part4/requirements.txt -e . -e ./part2/stage-2-database-performance -e ./part4
           for db in capstone regression synthetic; do createdb -h localhost -U postgres "$db"; done
       - name: Run the four test suites
         run: |

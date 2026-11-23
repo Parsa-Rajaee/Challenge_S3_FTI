@@ -26,9 +26,9 @@ def write_reports(output):
     latest_month = max(data["monthly"])
     latest = data["monthly"][latest_month]
     last_month = (
-        f"In {latest_month}, the 10% limit allowed {latest['total_flagged']:,} contacts "
-        f"across {latest['eligible_orders']:,} eligible orders. "
-        f"Orders with reviews totaled {latest['n']:,}, including {latest['positives']:,} with negative reviews."
+        f"In {latest_month}, the 10% limit allowed {latest['total_flagged']:,} contacts. "
+        f"Eligible orders totaled {latest['eligible_orders']:,}. "
+        f"Of those, {latest['n']:,} had reviews and {latest['positives']:,} had negative reviews."
     )
     if latest["recall"] is not None:
         last_month += f" The list found {percent(latest['recall'])} of those orders."

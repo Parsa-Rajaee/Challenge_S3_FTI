@@ -30,11 +30,11 @@ Independent Python and SQL transformations or one query? Use the same PostgreSQL
 
 ### How to select a model
 
-Holdout tuning or chronological validation? Choose by validation recall at the operational quota before examining test outcomes. A single validation month can favor an unstable family.
+Holdout tuning, a single validation month or rolling validation? Use up to three development months and pool known negatives found at each month's quota. The wider comparison gauges whether a family depends on a single month's mix. The strict label cutoff leaves late reviews unresolved during validation.
 
 ### How many to contact
 
-Round up or down? Round down at each requested capacity. Stable input order breaks ties. Fewer than ten orders result in zero follow-ups at 10%.
+Round up or down? Round down at each requested capacity. Ties favor the earliest approval, then the lowest order ID. Fewer than ten orders result in zero follow-ups at 10%.
 
 ### How to handle holidays
 
