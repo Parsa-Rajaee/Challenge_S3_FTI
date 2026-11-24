@@ -43,8 +43,9 @@ def test_raw_to_ranked(tmp_path, monkeypatch):
     for i in range(120):
         purchase = datetime(2017, 1 + i // 20, 1 + i % 20, 8)
         approval = purchase + timedelta(hours=1)
+        answer = datetime(2017, 3, 2) if i == 21 else approval
         tables["orders"].append([uid(i+10),uid(1),"delivered",purchase,approval,approval,approval,approval])
-        tables["order_reviews"].append([uid(i+500),uid(i+10),1 if i % 3 == 0 else 5,"","",approval,approval])
+        tables["order_reviews"].append([uid(i+500),uid(i+10),1 if i % 3 == 0 else 5,"","",approval,answer])
     for table in DATASETS:
         with (raw / table.filename).open("w",newline="") as stream:
             writer = csv.writer(stream)
@@ -78,7 +79,46 @@ def test_raw_to_ranked(tmp_path, monkeypatch):
     unseen.to_csv(path,index=False)
     runner.main(args)
     pd.testing.assert_frame_equal(result, pd.read_csv(out/"new.csv"))
-    assert json.loads((out/"evaluation.json").read_text())["training_rows"] > 0
+    evaluation = json.loads((out / "evaluation.json").read_text())
+    assert evaluation["training_rows"] > 0
+    folds = evaluation["validation_folds"]
+    assert list(folds) == ["2017-02", "2017-03", "2017-04"]
+    assert folds["2017-02"]["models"]["logistic"]["n"] == 19
+    assert folds["2017-03"]["fit_rows"] == 39
+    assert folds["2017-04"]["fit_rows"] == 60
+
+    with engine.begin() as connection:
+        connection.execute(text("""
+            UPDATE olist.orders SET order_delivered_carrier_date = '2017-01-02 12:00'
+            WHERE order_id = :order_id
+        """), {"order_id": uid(10)})
+
+    # A malformed replacement should roll the reference refresh back as well.
+    invalid_capture = tmp_path / "invalid.csv"
+    invalid_capture.write_text(capture.read_text() + "malformed\n")
+    with pytest.raises(ValueError, match="Invalid checkout snapshot on line 4"):
+        runner.main(["refresh-reference", "--checkout-snapshots", str(invalid_capture)])
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT shipments FROM capstone.shipping_days WHERE day = '2017-01-01'"
+        )).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM capstone.checkout_snapshots")).scalar_one() == 2
+
+    runner.main(["refresh-reference"])
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT shipments FROM capstone.shipping_days WHERE day = '2017-01-01'"
+        )).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM capstone.checkout_snapshots")).scalar_one() == 2
+
+    replacement = tmp_path / "replacement.csv"
+    replacement.write_text(capture.read_text().splitlines()[0] + "\n"
+                           + f"{uid(10)},2017-01-01 08:45:00,1,3,60,0\n")
+    runner.main(["refresh-reference", "--checkout-snapshots", str(replacement)])
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT product_count FROM capstone.feature_rows WHERE order_id = :id"
+        ), {"id": uid(10)}).scalar_one() == 3
 
 def test_calendar_quarantines_wrong_country(tmp_path):
     from nyc311_factory.holidays import acquire_holidays

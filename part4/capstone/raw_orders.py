@@ -15,15 +15,15 @@ def feature_query(source):
     template = (ROOT / "sql" / "order_features.sql").read_text(encoding="utf-8")
     return template.replace("{orders}", source)
 
-def ensure_calendar(connection, years):
-    holidays = acquire_holidays(years, ROOT / "data" / "external")
+def ensure_calendar(connection, years, offline=False):
+    holidays = acquire_holidays(years, ROOT / "data" / "external", offline)
     for day, name, source in holidays:
         connection.execute(text("""
             INSERT INTO capstone.holidays VALUES (:day,:name,:source)
             ON CONFLICT (holiday_date) DO NOTHING
         """), {"day":day, "name":name, "source":source})
 
-def raw_features(path, engine):
+def raw_features(path, engine, offline=False):
     contract = next(table for table in DATASETS if table.name == "orders")
     headers = [field.source_name for field in contract.fields]
     rows = []
@@ -47,7 +47,7 @@ def raw_features(path, engine):
                 years.add(row["order_approved_at"].year)
                 rows.append(row)
     with engine.begin() as connection:
-        ensure_calendar(connection, years)
+        ensure_calendar(connection, years, offline)
         connection.execute(text("""
             CREATE TEMP TABLE incoming_orders (
                 order_id uuid PRIMARY KEY, customer_id uuid, order_purchase_timestamp timestamp,

@@ -1,46 +1,77 @@
 """Write a short operations brief from the actual build results."""
 import json
 
+
+def percent(value):
+    return "—" if value is None else f"{value:.1%}"
+
+
 def write_reports(output):
     data = json.loads((output / "evaluation.json").read_text())
     timings = json.loads((output / "timings.json").read_text())
     plan = json.loads((output / "feature_query_plan.json").read_text())[0]
     name = data["model_selected"]
     metrics = data["metrics"]
-    lines = ["# Customer support follow-up", "",
-             "Start with the flagged orders in follow_up_ranked.csv. Contact at most one order in ten. "
-             "A flag means an order merits a check-in. It does not establish that a customer is dissatisfied.", "",
-             "| Share contacted | Negative reviews found | Flagged orders with a known review that was negative |",
-             "|---|---:|---:|"]
-    for capacity in ("0.05","0.1","0.2"):
+    capacity_rows = [
+        "| Contact limit | Flagged | Flagged with reviews | Known negative reviews found | Precision among reviewed alerts |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for capacity in ("0.05", "0.1", "0.2"):
         result = metrics[name][capacity]
-        lines.append(f"| {float(capacity):.0%} | {result['recall']:.1%} | {result['precision']:.1%} |")
-    last = data["last_month"]["recall"]
-    latest = "no known outcomes" if last is None else f"{last:.1%} of known negative reviews found"
-    lines.extend(["", f"Latest month ({max(data['monthly'])}): {latest}.",
-                  "Customers who leave no review have unknown outcomes. Start by comparing a small randomly assigned outreach group with usual service before drawing conclusions about impact."])
-    (output / "operations_summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
-    lines = ["# Measured results", "", *lines[4:9],
-             "", f"Selected family: {name}. Boundary: {data['cutoff_month']}.",
-             f"Simple approval-delay rule recall: {metrics['approval_delay_baseline']['0.1']['recall']:.2%}.",
-             f"Leaky comparison minus selected model recall: {data['leakage_recall_delta_at_10pct']:+.2%}.",
-             f"Holiday contribution to recall: {metrics[name]['0.1']['recall']-metrics['without_holiday']['0.1']['recall']:+.2%}.",
-             f"Full feature SELECT: {plan['Execution Time']:.1f} ms. Build: {timings['total_seconds']:.1f} seconds.",
-             "", "See evaluation.json for the confusion counts, each month's sample size and drift by feature."]
+        capacity_rows.append(
+            f"| {float(capacity):.0%} | {result['total_flagged']:,} | {result['selected']:,} "
+            f"| {percent(result['recall'])} | {percent(result['precision'])} |"
+        )
+    main_result = metrics[name]["0.1"]
     latest_month = max(data["monthly"])
     latest = data["monthly"][latest_month]
-    lines.extend(["", f"Last month: {latest_month}, {latest['eligible_orders']} eligible orders, "
-                       f"{latest['n']} reviewed, {latest.get('positives', 0)} negative.",
-                  f"Known-outcome recall: {latest['recall']}.",
-                  f"Missing approvals excluded: {data['approved_timestamp_missing_excluded']}."])
+    last_month = (
+        f"In {latest_month}, the 10% limit allowed {latest['total_flagged']:,} contacts. "
+        f"Eligible orders totaled {latest['eligible_orders']:,}. "
+        f"Of those, {latest['n']:,} had reviews and {latest['positives']:,} had negative reviews."
+    )
+    if latest["recall"] is not None:
+        last_month += f" The list found {percent(latest['recall'])} of those orders."
+    operations = [
+        "# Customer support follow-up",
+        "",
+        "Start at the top of the ranked list and contact the flagged customers. "
+        "Use the list to offer order updates and log whether customers needed help.",
+        "",
+        f"The public holdout contained {main_result['eligible_orders']:,} eligible orders "
+        f"and {main_result['n']:,} had reviews. Orders without reviews still count toward the contact limit.",
+        "",
+        *capacity_rows,
+        "",
+        last_month,
+        "",
+        "Compare a small, randomly assigned outreach group with usual service to measure whether contacting customers helps.",
+    ]
+    (output / "operations_summary.md").write_text("\n".join(operations) + "\n", encoding="utf-8")
+    baseline_recall = metrics["approval_delay_baseline"]["0.1"]["recall"]
+    holiday_recall = metrics["without_holiday"]["0.1"]["recall"]
+    lines = [
+        "# Measured results",
+        "",
+        *capacity_rows,
+        "",
+        f"The {name} model was selected using {len(data['validation_folds'])} chronological "
+        f"validation months. The holdout starts in {data['cutoff_month']}.",
+        f"The approval-delay rule found {baseline_recall:.2%} of known negative reviews at 10% capacity.",
+        f"Adding future information changed recall by {100 * data['leakage_recall_delta_at_10pct']:+.2f} percentage points.",
+        f"The holiday flag changed recall by {100 * (main_result['recall'] - holiday_recall):+.2f} percentage points.",
+        f"The full feature query ran in {plan['Execution Time']:.1f} ms and the build took {timings['total_seconds']:.1f} seconds.",
+        "",
+        last_month,
+        f"Excluded {data['approved_timestamp_missing_excluded']:,} orders with missing approvals.",
+        "See evaluation.json for confusion counts, monthly results and drift by feature.",
+    ]
     numeric_drift = {}
     for feature, change in data["drift"].items():
         shift = change.get("standardized_mean_shift")
         if shift is not None:
             numeric_drift[feature] = shift
     for feature in sorted(numeric_drift, key=numeric_drift.get, reverse=True)[:3]:
-        lines.append(f"Training-to-holdout shift in {feature}: {numeric_drift[feature]:.2f} training standard deviations.")
-    lines.append(f"Timestamped commercial snapshot coverage: {data['snapshot_coverage']:.1%}.")
-    if latest["eligible_orders"] < 10:
-        lines.append("The last month had fewer than ten orders. The 10% limit permitted zero calls.")
+        lines.append(f"The mean of {feature} shifted by {numeric_drift[feature]:.2f} training standard deviations.")
+    lines.append(f"Timestamped commercial snapshots covered {data['snapshot_coverage']:.1%} of approvals.")
     (output / "measured_results.md").write_text("\n".join(lines)+"\n", encoding="utf-8")

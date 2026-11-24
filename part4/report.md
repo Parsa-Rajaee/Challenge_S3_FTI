@@ -11,8 +11,8 @@ The decision happens when payment approval is recorded. A support agent needs a 
 - **When to learn.** Fit on orders whose last recorded answer precedes the training boundary. Slow responses reduce training coverage.
 - **What to join.** Use prior-day events and checkout geography. Exclude unversioned payment, catalog and seller attributes. We lose potentially useful commercial signals.
 - **Where to compute.** Use the same PostgreSQL SELECT for historical and incoming orders. Raw scoring requires the reference database.
-- **How to select a model.** Choose by validation recall at the operational quota before examining test outcomes. A single validation month can favor an unstable family.
-- **How many to contact.** Round down at each requested capacity. Stable input order breaks ties. Fewer than ten orders result in zero follow-ups at 10%.
+- **How to select a model.** Compare logistic regression and random forest in up to three development months. Each fit uses earlier orders with outcomes known before that month. Within the validation month, reserve capacity for all approvals and count only outcomes known by the next month. Pool the negative orders found across those separate queues. This gives a busier month more weight when it has more known negatives.
+- **How many to contact.** Round down at each requested capacity. Ties go to the earliest approval, then the lowest order ID. The queue and the quota use the same ranking. Fewer than ten orders result in zero follow-ups at 10%.
 - **How to handle holidays.** Compare the selected family with an otherwise identical fit holding the holiday flag constant. A sparse calendar may add no measurable value.
 - **How to ingest.** Use a Stage 1 source adapter, Stage 2 Olist contracts and transactional quarantine, and Stage 1 manifest utilities. Clean rebuilds require a dedicated database.
 - **How to measure speed.** Measure the full feature SELECT with EXPLAIN ANALYZE and time historical aggregation separately inside the feature stage. A warm plan and a cold build measure different costs.
@@ -27,26 +27,24 @@ The original implementation used freight divided by item price as the baseline a
 
 ## Performance, drift and the last month
 
-Run the system notebook to inspect exact confusion counts, capacity trade-offs, review coverage, calendar ablation and the latest month's negative-review count. A month with one bad review can move from zero to full recall on one order. Compare its volume and the largest changes in inputs before attributing a loss to geography or workload. This observational comparison cannot establish cause. Over six months, incomplete reference history or a change in who leaves reviews could move both rankings and reported success. Monitor missing states, last available event day, reviewed fraction, recalls after reviews mature and monthly alert counts.
+The solution notebook shows confusion counts and the capacity trade-off. The exploration notebook shows volume, review coverage, calendar ablation and the latest month's negative-review count. A month with one bad review can move from zero to full recall on one order. Compare volume and changes in the inputs before drawing conclusions about geography or workload. Over six months, incomplete event history or a change in who leaves reviews could move both rankings and measured recall. Track missing states, the last available event day, review coverage, recall after reviews mature, and contact counts by month.
 
 ## Limits and follow-up
 
-The assignment requests seller, product, payment and geography inputs. Checkout geography is used, but the public tables cannot certify when each seller, product or payment field was recorded. Obtain versioned approval-time snapshots before admitting those fields. Daily event features need recent events in the scoring database. A frozen installation faced with future orders can silently see zero activity. National holidays omit local closures. Offline replay needs a previously populated calendar cache.
+The assignment requests seller, product, payment and geography inputs. Checkout geography uses the order-specific customer record. Seller, product and payment features require an observed checkout snapshot because the public tables lack first-seen timestamps. After loading recent events, refresh the daily aggregates before live scoring. The refresh does not train a new model, so changes in the order mix still warrant a separate evaluation. National holidays omit local closures. Offline replay needs a previously populated calendar cache.
 
 With two further days, investigate intervention effectiveness on a randomized group of eligible orders, and obtain independently timestamped checkout and payment events. Record a baseline on the actual evaluation machine and repeat the SQL timing after a cold database restart.
 
 ## AI usage
 
-An AI assistant drafted the implementation, tests and analysis text. The recorded run produces the measured results. No student-authored revisions or private evaluator results are claimed.
+An AI assistant drafted and revised the implementation, tests and analysis text. The notebooks contain the measured results from an executed public-data run.
 
 ## Timestamped commercial inputs
 
 The optional checkout snapshot contract adds seller and product counts, payment value and cross-state shipping. Its source must capture those facts at the stated time. The public benchmark has zero timestamped coverage, so those inputs cannot support a retrospective performance claim. Coverage is recorded in evaluation.json.
 
-## First verified public benchmark
+## Verified public benchmark
 
-In the approval-time model run with the May 2018 cutoff, contacting 5%, 10% and 20% found 6.3%, 12.9% and 23.9% of known negative reviews. At 10%, approval delay alone found 10.22%. Future information inflated recall by 18.97 percentage points. The holiday signal reduced recall by 0.07 points. The last month had only one approved order and one negative review. A 10% hard cap allowed no call, so the latest-month recall was zero by construction. This result cannot establish that customers or the model changed.
+Across February–April 2018 validation, pooled recall at 10% capacity was 8.98% for logistic regression and 8.90% for random forest. Random forest led in March. The final holdout starts in May 2018 and contains 26,027 approvals, 25,892 with at least one review. Contacting 5%, 10% and 20% found 6.4%, 12.8% and 23.9% of orders with known negative reviews. At 10%, approval delay alone found 10.22%. The model found 369 of 2,878 negative outcomes. Future information raised recall by 18.97 percentage points. The holiday flag decreased recall by 0.14 points. September had one approved order and one negative review. The 10% hard cap allowed zero contacts.
 
-The full feature query took 148 ms and the build 73.6 seconds on the hosted runner. These measurements describe the linked run before optional timestamped commercial inputs. Later runs regenerate both numbers, the confusion counts and the executed notebooks.
-
-[Benchmark run and executed notebooks](https://github.com/Parsa-Rajaee/Challenge_S3_FTI/actions/runs/44893656824)
+The full feature query took 291.0 ms and the build took 137.4 seconds in the recorded public run. Both passed their runtime budgets. The full raw-order replay reproduced all holdout scores and flags after removing post-approval delivery fields. The saved solution notebook displays timings, replay counts and the full confusion counts.
